@@ -37,13 +37,14 @@ class Player {
   update(dt, game) {
     if (this.dead) return;
     const k = Input.keys;
-    const dx = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
-    const dy = (k.KeyS || k.ArrowDown ? 1 : 0) - (k.KeyW || k.ArrowUp ? 1 : 0);
+    let dx = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
+    let dy = (k.KeyS || k.ArrowDown ? 1 : 0) - (k.KeyW || k.ArrowUp ? 1 : 0);
+    if (Input.stick.x || Input.stick.y) { dx = Input.stick.x; dy = Input.stick.y; } // analog, length <= 1
     this.moving = dx !== 0 || dy !== 0;
     if (this.moving) {
-      const len = Math.hypot(dx, dy);
-      this.x += dx / len * this.stats.speed * dt;
-      this.y += dy / len * this.stats.speed * dt;
+      const len = Math.hypot(dx, dy), mag = Math.min(1, len);
+      this.x += dx / len * mag * this.stats.speed * dt;
+      this.y += dy / len * mag * this.stats.speed * dt;
     }
     this.x = clamp(this.x, ARENA.x0 + 6, ARENA.x1 - 6);
     this.y = clamp(this.y, ARENA.y0 + 6, ARENA.y1 - 8);

@@ -394,6 +394,8 @@ const Game = {
   update(dt) {
     this.t += dt;
     this.stateT += dt;
+    Input.playing = this.state === 'play';
+    Input.showButtons = this.state === 'play' || this.state === 'pause';
     if (Input.pressed.KeyM) {
       Sfx.muted = !Sfx.muted;
       Save.data.muted = Sfx.muted;
@@ -469,6 +471,26 @@ const Game = {
     }
   },
 
+  drawTouchUI() {
+    if (Input.showButtons) {
+      for (const b of Input.touchButtons) {
+        ctx.fillStyle = 'rgba(26,28,44,0.6)';
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        drawFrame(b.x, b.y, b.w, b.h, '#566c86');
+        drawText(ctx, b.label, b.x + b.w / 2, b.y + 5);
+      }
+    }
+    if (Input.stickBase && this.state === 'play') {
+      const s = Input.stickBase, k = Input.stickKnob;
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = '#f4f4f4';
+      ctx.beginPath(); ctx.arc(s.x, s.y, 22, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath(); ctx.arc(k.x, k.y, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  },
+
   dim() {
     ctx.fillStyle = 'rgba(26,28,44,0.75)';
     ctx.fillRect(0, 0, W, H);
@@ -535,7 +557,8 @@ const Game = {
       }
       this.drawButtons();
     }
-    drawCrosshair();
+    if (Input.touchMode) this.drawTouchUI();
+    else drawCrosshair();
   },
 };
 
@@ -545,6 +568,17 @@ Sfx.muted = !!Save.data.muted;
 Input.init(canvas);
 addEventListener('mousedown', () => Sfx.init());
 addEventListener('keydown', () => Sfx.init());
+let triedFullscreen = false;
+addEventListener('touchend', () => {
+  Sfx.init();
+  // Phones: go fullscreen + landscape on the first tap (silently ignored where unsupported).
+  if (!triedFullscreen && document.documentElement.requestFullscreen) {
+    triedFullscreen = true;
+    document.documentElement.requestFullscreen()
+      .then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'))
+      .catch(() => {});
+  }
+});
 addEventListener('blur', () => { if (Game.state === 'play') Game.setState('pause'); });
 
 Game.decals = document.createElement('canvas');
