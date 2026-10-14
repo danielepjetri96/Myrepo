@@ -54,7 +54,7 @@ const keysDown = new Set();
 const mouse = { x: W / 2, y: H / 2, down: false };
 addEventListener('keydown', e => {
   Sfx.init();
-  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   if (!e.repeat) pressedKeys.add(e.code);
   keysDown.add(e.code);
 });
@@ -83,7 +83,7 @@ function startChapter(id) {
   endlessResult = null;
   const chapter = CHAPTERS.find(c => c.id === id);
   let run = progression.run;
-  if (!(run && run.chapter === id && run.level <= chapter.levels)) { progression.startChapter(id); run = progression.run; }
+  if (!(run && run.chapter === id && Number.isInteger(run.level) && run.level >= 1 && run.level <= chapter.levels)) { progression.startChapter(id); run = progression.run; }
   if (run) { chapterId = id; mode = 'chapter'; beginLevel(); }
 }
 function beginLevel() {
@@ -97,6 +97,7 @@ function beginLevel() {
     sim = JumpGuy.create(JumpGuy.buildLevel(run.level));
   }
   hud = { lives: run.lives, level: run.level };
+  particles = []; mouse.down = false;   // a button still held from the menu must not fire
   scene = 'play'; sceneTime = 0; gameOver = false;
 }
 function startEndless() {
@@ -157,7 +158,7 @@ function updateMenu() {
 // ---- update (fixed 60 Hz) ----
 const DT = 1 / 60;
 
-// Both return 'hit' (a life lost), 'passed' (level cleared) or null.
+// updateRunner and updateRoom both return 'hit' (a life lost), 'passed' (level cleared) or null.
 function updateRunner() {
   const pressed = wasPressed(...JUMP_KEYS) || !!click;
   const wasGrounded = sim.grounded;
@@ -375,12 +376,12 @@ function drawRoom() {
   }
   // enemies (blinking outline while they spawn)
   for (const e of sim.enemies) {
-    const x = Math.round(e.x - cam.x - 8), y = Math.round(e.y - cam.y - 8);
+    const x = Math.round(e.x - cam.x - 8), y = Math.round(e.y - cam.y - 6);
     if (e.spawnT > 0) {
-      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = '#a7f070'; ctx.strokeRect(x + 2.5, y + 2.5, 11, 11); }
+      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = '#a7f070'; ctx.strokeRect(x + 2.5, y - 0.5, 11, 11); }
       continue;
     }
-    pixels(GRUNT, e.flash > 0 ? { g: '#ffffff', e: '#ffffff' } : GRUNT_PAL, x + 1, y + 2, 2);
+    pixels(GRUNT, e.flash > 0 ? { g: '#ffffff', e: '#ffffff' } : GRUNT_PAL, x, y, 2);
   }
   for (const b of sim.bullets) { ctx.fillStyle = '#ffcd75'; ctx.fillRect(Math.round(b.x - cam.x - 1.5), Math.round(b.y - cam.y - 1.5), 3, 3); }
   // player (blinks while invulnerable)

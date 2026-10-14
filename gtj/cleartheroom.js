@@ -83,9 +83,9 @@ const ClearTheRoom = {
         const ax = input.aimX - p.x, ay = input.aimY - p.y, al = Math.hypot(ax, ay);
         if (al > 1) { p.dirX = ax / al; p.dirY = ay / al; }
         p.invuln = Math.max(0, p.invuln - dt);
-        p.fireCd = Math.max(0, p.fireCd - dt);
+        p.fireCd = Math.max(-dt, p.fireCd - dt);   // may go slightly negative so the cadence does not drift
         if (input.fire && p.fireCd <= 0) {
-          p.fireCd = 1 / P.fireRate;
+          p.fireCd += 1 / P.fireRate;
           sim.bullets.push({ x: p.x, y: p.y, vx: p.dirX * P.bulletSpeed, vy: p.dirY * P.bulletSpeed, left: P.range });
           sim.fx.push({ type: 'shoot', x: p.x, y: p.y });
         }
