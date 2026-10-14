@@ -71,7 +71,7 @@ const ClearTheRoom = {
       picks.push(k);
     }
     const waves = picks.map(() => ClearTheRoom.buildWaves(cfg, rng));
-    const make = (index, hp) => ClearTheRoom.create({ layout: layouts[picks[index]], waves: waves[index], final: index === cfg.rooms - 1, hp });
+    const make = (index, carry) => ClearTheRoom.create({ layout: layouts[picks[index]], waves: waves[index], final: index === cfg.rooms - 1, carry });
     const T = ClearTheRoom.ROOM_TRANSITION;
     const level = {
       roomIndex: 0,
@@ -85,13 +85,14 @@ const ClearTheRoom = {
       get enemies() { return level.sim.enemies; },
       get bullets() { return level.sim.bullets; },
       get fx() { return level.sim.fx; },
+      get cleared() { return level.transition <= 0 && level.sim.cleared; },
       update(dt, input) {
         if (level.transition > 0) {
           const before = level.transition;
           level.transition = Math.max(0, level.transition - dt);
           if (before > T / 2 && level.transition <= T / 2) {
             level.roomIndex++;
-            level.sim = make(level.roomIndex, level.sim.player.hp);
+            level.sim = make(level.roomIndex, level.sim.player);
           }
           return null;
         }
@@ -105,13 +106,13 @@ const ClearTheRoom = {
 
   // layout: rows of characters; waves: result of buildWaves (spawn points are used in a fixed, distance-based order).
   // final: the last room of a level (clearing it passes the level); otherwise clearing it opens the doors.
-  // hp: health carried over from the previous room.
-  create({ layout, waves, final = true, hp }) {
+  // carry: the player of the previous room; its health and invulnerability time carry over.
+  create({ layout, waves, final = true, carry }) {
     const D = ClearTheRoomData, P = D.player;
     const room = ClearTheRoom.parseLayout(layout);
     const sim = {
       room,
-      player: { x: room.start.x, y: room.start.y, size: P.size, hp: hp === undefined ? P.maxHp : hp, maxHp: P.maxHp, invuln: 0, fireCd: 0, dirX: 1, dirY: 0 },
+      player: { x: room.start.x, y: room.start.y, size: P.size, hp: carry ? carry.hp : P.maxHp, maxHp: P.maxHp, invuln: carry ? carry.invuln : 0, fireCd: 0, dirX: 1, dirY: 0 },
       enemies: [],
       bullets: [],
       fx: [],                 // { type: 'shoot' | 'hit' | 'kill' | 'hurt', x, y }
@@ -255,7 +256,7 @@ const ClearTheRoom = {
           return null;
         }
         if (!final) {
-          if (!sim.cleared) { sim.cleared = true; room.openDoors(); }
+          if (!sim.cleared) { sim.cleared = true; room.openDoors(); sim.field = null; }
           return null;
         }
         sim.clearTimer -= dt;

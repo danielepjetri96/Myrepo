@@ -645,7 +645,9 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     const door = doorCenter(lv.sim.room);
     lv.sim.player.x = door.x; lv.sim.player.y = door.y;   // standing in the wall: tries to walk out
     eq(lv.sim.room.hits(door.x, door.y, 5), true, 'the door is solid');
+    lv.sim.enemies.length = 0; lv.sim.waveIndex = 0; lv.sim.waveTimer = 1e9;   // keep the room uncleared with nothing attacking
     eq(stepLevel(lv, {}, 120), null, 'no exit');
+    eq(lv.cleared, false);
     eq(lv.roomIndex, 0);
   });
 

@@ -366,7 +366,7 @@ function drawRoom() {
   const i0 = Math.floor(cam.x / T), i1 = Math.ceil((cam.x + W) / T), j0 = Math.floor(cam.y / T), j1 = Math.ceil((cam.y + H) / T);
   for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
     const x = Math.round(i * T - cam.x), y = Math.round(j * T - cam.y);
-    if (r.doors.some(d => d.i === i && d.j === j)) {
+    if (r.inDoor(x + cam.x + 1, y + cam.y + 1)) {
       if (r.solid[j][i]) { // closed door
         ctx.fillStyle = '#b13e53'; ctx.fillRect(x, y, T, T);
         ctx.fillStyle = '#ef7d57'; ctx.fillRect(x + 2, y + 2, T - 4, T - 4);
@@ -502,7 +502,7 @@ function draw() {
   }
   if (scene === 'play') {
     if (chapterId === 'cleartheroom') {
-      if (sim.sim.cleared) text('ROOM CLEARED - TAKE THE OPEN DOOR', W / 2, 160, '#a7f070', 8, 'center');
+      if (sim.cleared) text('ROOM CLEARED - TAKE THE OPEN DOOR', W / 2, 160, '#a7f070', 8, 'center');
       else if (roomHelp > 0) text('WASD MOVE   MOUSE AIM + HOLD CLICK TO SHOOT', W / 2, 160, '#fff', 8, 'center');
     } else {
       if (mode === 'chapter') drawProgressBar();
