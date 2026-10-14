@@ -6,6 +6,7 @@ const Progression = {
 
   create({ storage, chapters }) {
     const indexOf = id => chapters.findIndex(c => c.id === id);
+    const chapterById = id => chapters[indexOf(id)];
     const state = { run: null, completed: [], records: {} };
 
     function save() {
@@ -31,7 +32,7 @@ const Progression = {
       }
 
       const run = raw.run;
-      const chapter = run && chapters[indexOf(run.chapter)];
+      const chapter = run && chapterById(run.chapter);
       if (chapter && api.isChapterUnlocked(chapter.id)
           && Number.isInteger(run.level) && run.level >= 1 && run.level <= chapter.levels
           && Number.isInteger(run.lives) && run.lives >= 1 && run.lives <= Progression.LIVES) {
@@ -63,9 +64,11 @@ const Progression = {
         return true;
       },
 
+      // Returns null when there is no active run (e.g. a chapter signalling twice).
       levelPassed() {
         const run = state.run;
-        const chapter = chapters[indexOf(run.chapter)];
+        if (!run) return null;
+        const chapter = chapterById(run.chapter);
         if (run.level < chapter.levels) {
           run.level++;
           save();
@@ -80,6 +83,7 @@ const Progression = {
       // A lost life restarts the level; the last one restarts the whole chapter.
       lifeLost() {
         const run = state.run;
+        if (!run) return null;
         let gameOver = false;
         if (--run.lives <= 0) {
           run.level = 1;
@@ -96,7 +100,7 @@ const Progression = {
 
       // Returns true when the score is a new record.
       submitEndless(id, score) {
-        if (!api.isEndlessUnlocked(id) || score <= api.record(id)) return false;
+        if (!Number.isFinite(score) || !api.isEndlessUnlocked(id) || score <= api.record(id)) return false;
         state.records[id] = score;
         save();
         return true;

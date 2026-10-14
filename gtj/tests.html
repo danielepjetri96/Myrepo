@@ -270,6 +270,25 @@ test('the game still works when storage is unavailable', () => {
   eq(p.run, null);
 });
 
+test('level and life events without an active run are ignored', () => {
+  const p = fresh();
+  eq(p.levelPassed(), null);
+  eq(p.lifeLost(), null);
+  complete(p, 'a', 3);
+  eq(p.levelPassed(), null, 'double signal after the last level');
+  eq(p.lifeLost(), null);
+  eq(p.run, null);
+  eq(p.isChapterCompleted('a'), true);
+  eq(p.isChapterCompleted('b'), false);
+});
+
+test('endless scores that are not finite numbers are ignored', () => {
+  const p = fresh();
+  complete(p, 'a', 3);
+  for (const bad of [NaN, Infinity, '50', null, undefined]) eq(p.submitEndless('a', bad), false, String(bad));
+  eq(p.record('a'), 0);
+});
+
 // ---- report ----
 const failed = results.filter(r => !r.ok).length;
 document.getElementById('summary').textContent = failed ? 'FAIL ' + failed + ' / ' + results.length : 'PASS ' + results.length + ' / ' + results.length;
