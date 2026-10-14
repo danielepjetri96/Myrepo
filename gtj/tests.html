@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
 <meta charset="utf-8">
-<title>GtJ - test progressione</title>
+<title>GtJ - test</title>
 <style>
   body { font: 14px/1.5 monospace; background: #111; color: #ddd; margin: 16px; }
   .pass { color: #6c6; } .fail { color: #f66; }
@@ -13,6 +13,7 @@
 <h1 id="summary">Esecuzione...</h1>
 <pre id="out"></pre>
 <script src="progression.js"></script>
+<script src="jumpguy.js"></script>
 <script>
 // Tiny test runner: open this file in a browser, no server needed.
 const results = [];
@@ -287,6 +288,76 @@ test('endless scores that are not finite numbers are ignored', () => {
   complete(p, 'a', 3);
   for (const bad of [NaN, Infinity, '50', null, undefined]) eq(p.submitEndless('a', bad), false, String(bad));
   eq(p.record('a'), 0);
+});
+
+
+// ---- Jump Guy ----
+const DT = 1 / 60;
+const LEVEL1 = JumpGuy.LEVELS[0];
+// Runs a level with a simple bot; jumpWhen(sim) decides when to press.
+function run(def, jumpWhen, maxSteps) {
+  const sim = JumpGuy.create(def);
+  for (let i = 0; i < (maxSteps || 4000); i++) {
+    const ev = sim.update(DT, { pressed: !!jumpWhen && jumpWhen(sim) });
+    if (ev) return { ev, sim, steps: i + 1 };
+  }
+  return { ev: null, sim };
+}
+function nextObstacleGap(sim) {
+  const front = sim.dist + JumpGuy.PLAYER_X + JumpGuy.PLAYER_W;
+  const o = sim.def.obstacles.find(o => o.x + o.w > front - JumpGuy.PLAYER_W);
+  return o ? o.x - front : Infinity;
+}
+const bot = sim => sim.grounded && nextObstacleGap(sim) < 24 && nextObstacleGap(sim) > 0;
+
+test('doing nothing hits the first obstacle', () => {
+  const r = run(LEVEL1, null);
+  eq(r.ev, 'hit');
+  eq(r.sim.state, 'hit');
+});
+
+test('jumping before each obstacle reaches the finish', () => {
+  const r = run(LEVEL1, bot);
+  eq(r.ev, 'passed');
+});
+
+test('a finished level reports its event only once', () => {
+  const r = run(LEVEL1, bot);
+  eq(r.sim.update(DT, { pressed: true }), null);
+  const h = run(LEVEL1, null);
+  eq(h.sim.update(DT, {}), null);
+});
+
+test('the jump button lifts the runner and gravity brings it back', () => {
+  const sim = JumpGuy.create({ length: 9999, obstacles: [] });
+  sim.update(DT, { pressed: true });
+  eq(sim.grounded, false);
+  let peak = sim.y;
+  for (let i = 0; i < 120; i++) { sim.update(DT, {}); peak = Math.min(peak, sim.y); }
+  eq(sim.grounded, true);
+  eq(peak < JumpGuy.GROUND - 50, true, 'jump is high enough');
+});
+
+test('a jump pressed slightly before landing still fires (buffer)', () => {
+  const sim = JumpGuy.create({ length: 9999, obstacles: [] });
+  sim.update(DT, { pressed: true });
+  while (sim.y < JumpGuy.GROUND - 4) sim.update(DT, {}); // nearly landed
+  sim.update(DT, { pressed: true });
+  for (let i = 0; i < 20; i++) sim.update(DT, {});
+  eq(sim.grounded, false, 'airborne again after landing');
+});
+
+test('a jump pressed just after leaving the ground still fires (edge tolerance)', () => {
+  const sim = JumpGuy.create({ length: 9999, obstacles: [] });
+  sim.grounded = false; sim.sinceGround = 0.05; sim.vy = 0; sim.y = JumpGuy.GROUND - 1;
+  sim.update(DT, { pressed: true });
+  eq(sim.vy < 0, true);
+});
+
+test('an obstacle grazing the edge of the hitbox is forgiven', () => {
+  const x = JumpGuy.PLAYER_X + JumpGuy.PLAYER_W + 1; // overlaps by 1px, less than the forgiveness
+  const sim = JumpGuy.create({ length: 9999, obstacles: [{ x, w: 14, h: 14 }] });
+  eq(sim.hitsObstacle(), false);
 });
 
 // ---- report ----
