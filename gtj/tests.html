@@ -789,6 +789,30 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     eq([...counts].sort(), [2, 3]);
   });
 
+  test('ctr: every enemy type can reach the player from every spawn point in every layout (no soft-lock on walls)', () => {
+    for (const [li, rows] of D.layouts.entries()) {
+      const room = ClearTheRoom.parseLayout(rows);
+      for (const id of Object.keys(D.enemies)) {
+        for (const spawn of room.spawns) {
+          const sim = ClearTheRoom.create({ layout: rows, waves: [[]] });
+          const e = spawnNow(sim, id, spawn.x, spawn.y);
+          sim.player.hp = 1000;
+          step(sim, {}, 60 * 60);
+          eq(sim.player.hp < 1000, true, 'layout ' + li + ': ' + id + ' from ' + spawn.x + ',' + spawn.y + ' never reached the player');
+        }
+      }
+    }
+  });
+
+  test('ctr: children of a splitter blink before attacking, and sit apart when there is room', () => {
+    const sim = mk([[]]); const e = spawnNow(sim, 'splitter', 300, 200); e.hp = 0;
+    sim.updateBullets(STEP);
+    const kids = sim.enemies.filter(x => x.type === 'minirunner');
+    eq(kids.length, 2);
+    eq(kids.every(k => k.spawnT > 0), true, 'warning time');
+    eq(kids[0].x !== kids[1].x || kids[0].y !== kids[1].y, true, 'not stacked');
+  });
+
   test('ctr: a bot that fights its way through every level survives most of the time', () => {
     const route = (room, from, to) => {
       const key = (i, j) => i + ',' + j, goal = key(to.i, to.j), prev = new Map(), queue = [[from.i, from.j]];
@@ -817,10 +841,9 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
           const sim = lv.sim, p = sim.player, live = sim.enemies.filter(e => e.spawnT <= 0);
           const near = live.slice().sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
           let mx = 0, my = 0;
-          const heart = sim.pickups[0];
           if (sim.cleared) {
-            const step = route(sim.room, { i: Math.floor(p.x / 20), j: Math.floor(p.y / 20) }, sim.room.doors[0]);
-            mx = step.x - p.x; my = step.y - p.y;
+            const next = route(sim.room, { i: Math.floor(p.x / 20), j: Math.floor(p.y / 20) }, sim.room.doors[0]);
+            mx = next.x - p.x; my = next.y - p.y;
           } else if (near) {
             const dx = p.x - near.x, dy = p.y - near.y, d = Math.hypot(dx, dy) || 1;
             if (d < 120) { mx = dx / d + (-dy / d) * 0.6; my = dy / d + (dx / d) * 0.6; }

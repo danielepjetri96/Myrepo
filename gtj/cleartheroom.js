@@ -51,12 +51,9 @@ const ClearTheRoom = {
       for (const id of ids) { r -= cfg.types[id]; if (r < 0) return id; }
       return ids[ids.length - 1];
     };
-    const waves = [], count = Array.isArray(cfg.waves) ? cfg.waves[0] + Math.floor(rng() * (cfg.waves[1] - cfg.waves[0] + 1)) : cfg.waves;
-    for (let w = 0; w < count; w++) {
-      const n = cfg.perWave[0] + Math.floor(rng() * (cfg.perWave[1] - cfg.perWave[0] + 1));
-      waves.push(Array.from({ length: n }, pick));
-    }
-    return waves;
+    // A count is either a number or a [min, max] range.
+    const count = v => Array.isArray(v) ? v[0] + Math.floor(rng() * (v[1] - v[0] + 1)) : v;
+    return Array.from({ length: count(cfg.waves) }, () => Array.from({ length: count(cfg.perWave) }, pick));
   },
 
   // A level: a chain of rooms, each picked at random (never the same layout twice in a row).
@@ -85,6 +82,7 @@ const ClearTheRoom = {
       get enemies() { return level.sim.enemies; },
       get bullets() { return level.sim.bullets; },
       get fx() { return level.sim.fx; },
+      get pickups() { return level.sim.pickups; },
       get cleared() { return level.transition <= 0 && level.sim.cleared; },
       update(dt, input) {
         if (level.transition > 0) {
@@ -189,9 +187,12 @@ const ClearTheRoom = {
       onKill(e) {
         const def = D.enemies[e.type];
         if (def.splits) {
+          // Children appear on opposite sides of the corpse (when there is room) and blink briefly before they attack.
           for (let k = 0; k < def.splits.count; k++) {
-            const a = (k / def.splits.count) * Math.PI * 2, child = sim.makeEnemy(def.splits.type, e.x + Math.cos(a) * 6, e.y + Math.sin(a) * 6, 0);
-            if (!room.hits(child.x, child.y, child.size / 2)) sim.enemies.push(child); else sim.enemies.push(sim.makeEnemy(def.splits.type, e.x, e.y, 0));
+            const a = (k / def.splits.count) * Math.PI * 2, half = D.enemies[def.splits.type].size / 2;
+            const x = e.x + Math.cos(a) * 8, y = e.y + Math.sin(a) * 8;
+            const free = !room.hits(x, y, half);
+            sim.enemies.push(sim.makeEnemy(def.splits.type, free ? x : e.x, free ? y : e.y, D.splitWarning));
           }
         }
         if (def.dropChance > 0 && rng() < def.dropChance) sim.pickups.push({ x: e.x, y: e.y });
@@ -206,7 +207,7 @@ const ClearTheRoom = {
       updatePickups() {
         const p = sim.player;
         sim.pickups = sim.pickups.filter(h => {
-          if (p.hp < p.maxHp && Math.hypot(p.x - h.x, p.y - h.y) < 10) { p.hp++; sim.fx.push({ type: 'heal', x: h.x, y: h.y }); return false; }
+          if (p.hp < p.maxHp && Math.hypot(p.x - h.x, p.y - h.y) < p.size / 2 + 5) { p.hp++; sim.fx.push({ type: 'heal', x: h.x, y: h.y }); return false; }
           return true;
         });
       },

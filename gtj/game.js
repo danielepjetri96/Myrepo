@@ -39,6 +39,7 @@ const Sfx = {
   shoot() { this.tone(520, 220, 0.07, 'square', 0.04); },
   enemyHit() { this.tone(180, 120, 0.06, 'square', 0.06); },
   kill() { this.tone(300, 60, 0.18, 'sawtooth', 0.08); },
+  heal() { this.tone(660, 990, 0.12, 'triangle', 0.08); },
   select() { this.tone(440, 660, 0.08, 'square', 0.07); },
   deny() { this.tone(120, 100, 0.12, 'square', 0.07); },
 };
@@ -189,7 +190,7 @@ function updateRoom() {
     else if (f.type === 'hit') { Sfx.enemyHit(); burst(f.x, f.y, '#a7f070', 3); }
     else if (f.type === 'kill') { Sfx.kill(); burst(f.x, f.y, '#a7f070', 10); }
     else if (f.type === 'hurt') { Sfx.hit(); shake = 0.15; }
-    else if (f.type === 'heal') { Sfx.select(); burst(f.x, f.y, '#ef4444', 6); }
+    else if (f.type === 'heal') { Sfx.heal(); burst(f.x, f.y, '#ef4444', 6); }
   }
   sim.fx.length = 0;
   if (roomHelp > 0) roomHelp -= DT;
@@ -385,7 +386,7 @@ function drawRoom() {
   }
   // enemies (blinking outline while they spawn)
   for (const e of sim.enemies) {
-    const art = ENEMY_ART[e.type], w = art.rows[0].length * 2, h = art.rows.length * 2;
+    const art = ENEMY_ART[e.type] || ENEMY_ART.grunt, w = art.rows[0].length * 2, h = art.rows.length * 2;
     const x = Math.round(e.x - cam.x - w / 2), y = Math.round(e.y - cam.y - h / 2);
     if (e.spawnT > 0) {
       if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = '#a7f070'; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
@@ -393,7 +394,7 @@ function drawRoom() {
     }
     pixels(art.rows, e.flash > 0 ? { c: '#ffffff', e: '#ffffff' } : { c: art.c, e: '#1a1c2c' }, x, y, 2);
   }
-  for (const h of sim.sim.pickups) pixels(HEART, { r: '#ef4444' }, Math.round(h.x - cam.x - 3.5), Math.round(h.y - cam.y - 3), 1);
+  for (const h of sim.pickups) pixels(HEART, { r: '#ef4444' }, Math.round(h.x - cam.x - 3.5), Math.round(h.y - cam.y - 3), 1);
   for (const b of sim.bullets) { ctx.fillStyle = '#ffcd75'; ctx.fillRect(Math.round(b.x - cam.x - 1.5), Math.round(b.y - cam.y - 1.5), 3, 3); }
   // player (blinks while invulnerable)
   const p = sim.player;

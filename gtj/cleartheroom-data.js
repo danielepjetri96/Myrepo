@@ -35,6 +35,7 @@ const ClearTheRoomData = {
 
   waveDelay: 1,         // s between a cleared wave and the next one
   spawnWarning: 0.6,    // s an enemy blinks at its spawn point before it becomes active
+  splitWarning: 0.25,   // same, for the children of a splitter
 
   // Room layouts, 32 x 18 tiles of 20 px (a 640 x 360 room). Each room picks one at random, never the same twice in a row.
   // '#' wall, '.' floor, 'S' enemy spawn point (floor), 'P' player start (floor),
