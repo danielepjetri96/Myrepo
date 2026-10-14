@@ -1,14 +1,14 @@
-// GtJ shell: menu, Jump Guy chapter, drawing, input and synthesized sound.
+// GtJ shell: menu, the playable chapters, drawing, input and synthesized sound.
 // Self-contained on purpose: nothing here depends on the Pixel Siege code.
 const W = 320, H = 180;
 
-// Chapter data for Progression. Jump Guy's level count comes from its data file; the others are placeholders.
+// Chapter data for Progression. Level counts come from each chapter's data file; One Tower Defense is a placeholder.
 const CHAPTERS = [
   { id: 'jumpguy', name: 'JUMP GUY', levels: JumpGuyData.levels.length },
-  { id: 'cleartheroom', name: 'CLEAR THE ROOM', levels: 1 },
+  { id: 'cleartheroom', name: 'CLEAR THE ROOM', levels: ClearTheRoomData.levels.length },
   { id: 'onetowerdefense', name: 'ONE TOWER DEFENSE', levels: 1 },
 ];
-const PLAYABLE = { jumpguy: true };
+const PLAYABLE = { jumpguy: true, cleartheroom: true };
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -36,6 +36,9 @@ const Sfx = {
   hit() { this.tone(220, 40, 0.4, 'sawtooth', 0.14); },
   win() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, f, 0.16, 'square', 0.09, i * 0.11)); },
   over() { [330, 262, 196, 130].forEach((f, i) => this.tone(f, f * 0.9, 0.22, 'triangle', 0.14, i * 0.18)); },
+  shoot() { this.tone(520, 220, 0.07, 'square', 0.04); },
+  enemyHit() { this.tone(180, 120, 0.06, 'square', 0.06); },
+  kill() { this.tone(300, 60, 0.18, 'sawtooth', 0.08); },
   select() { this.tone(440, 660, 0.08, 'square', 0.07); },
   deny() { this.tone(120, 100, 0.12, 'square', 0.07); },
 };
@@ -47,12 +50,20 @@ function toLogical(e) {
   const r = canvas.getBoundingClientRect();
   return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
 }
+const keysDown = new Set();
+const mouse = { x: W / 2, y: H / 2, down: false };
 addEventListener('keydown', e => {
   Sfx.init();
   if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
   if (!e.repeat) pressedKeys.add(e.code);
+  keysDown.add(e.code);
 });
-canvas.addEventListener('mousedown', e => { Sfx.init(); click = toLogical(e); });
+addEventListener('keyup', e => keysDown.delete(e.code));
+addEventListener('blur', () => { keysDown.clear(); mouse.down = false; });
+canvas.addEventListener('mousedown', e => { Sfx.init(); click = toLogical(e); mouse.down = true; });
+addEventListener('mouseup', () => { mouse.down = false; });
+canvas.addEventListener('mousemove', e => { Object.assign(mouse, toLogical(e)); });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
 const wasPressed = (...codes) => codes.some(c => pressedKeys.has(c));
 const JUMP_KEYS = ['Space', 'ArrowUp', 'KeyW'];
 
@@ -61,24 +72,35 @@ let scene = 'menu';           // menu | play | pause | confirm | dying | cleared
 let menuIndex = 0;
 let hud = { lives: 0, level: 1 };   // what the HUD shows, kept apart from Progression (which resets on game over)
 let clearedChapter = false;
+let chapterId = 'jumpguy';           // chapter being played: jumpguy | cleartheroom
 let mode = 'chapter';               // chapter | endless
 let endlessResult = null;           // { score, record, newRecord } after an endless run
+let roomHelp = 0;                   // seconds left of the controls hint in Clear the Room
 let sim = null, deathTimer = 0, sceneTime = 0, shake = 0, gameOver = false;
 
-function startJumpGuy() {
+// Starts (or resumes, if a saved run exists) a chapter at its saved level.
+function startChapter(id) {
   endlessResult = null;
+  const chapter = CHAPTERS.find(c => c.id === id);
   let run = progression.run;
-  if (!(run && run.chapter === 'jumpguy' && JumpGuyData.levels[run.level - 1])) { progression.startChapter('jumpguy'); run = progression.run; }
-  if (run) { mode = 'chapter'; beginLevel(); }
+  if (!(run && run.chapter === id && run.level <= chapter.levels)) { progression.startChapter(id); run = progression.run; }
+  if (run) { chapterId = id; mode = 'chapter'; beginLevel(); }
 }
 function beginLevel() {
   const run = progression.run;
-  sim = JumpGuy.create(JumpGuy.buildLevel(run.level));
+  if (chapterId === 'cleartheroom') {
+    const cfg = ClearTheRoomData.levels[run.level - 1];
+    const layouts = ClearTheRoomData.layouts;
+    sim = ClearTheRoom.create({ layout: layouts[Math.floor(Math.random() * layouts.length)], waves: ClearTheRoom.buildWaves(cfg) });
+    roomHelp = 4;
+  } else {
+    sim = JumpGuy.create(JumpGuy.buildLevel(run.level));
+  }
   hud = { lives: run.lives, level: run.level };
   scene = 'play'; sceneTime = 0; gameOver = false;
 }
 function startEndless() {
-  mode = 'endless'; endlessResult = null;
+  chapterId = 'jumpguy'; mode = 'endless'; endlessResult = null;
   sim = JumpGuy.create(JumpGuy.buildEndless());
   scene = 'play'; sceneTime = 0; gameOver = false;
 }
@@ -105,7 +127,7 @@ function activateItem(i) {
   const c = CHAPTERS[item.i];
   if (!progression.isChapterUnlocked(c.id) || !PLAYABLE[c.id]) { Sfx.deny(); return; }
   Sfx.select();
-  startJumpGuy();
+  startChapter(c.id);
 }
 
 // Clickable buttons: rectangles shared by update (hit-testing) and draw.
@@ -134,6 +156,58 @@ function updateMenu() {
 
 // ---- update (fixed 60 Hz) ----
 const DT = 1 / 60;
+
+// Both return 'hit' (a life lost), 'passed' (level cleared) or null.
+function updateRunner() {
+  const pressed = wasPressed(...JUMP_KEYS) || !!click;
+  const wasGrounded = sim.grounded;
+  const ev = sim.update(DT, { pressed });
+  if (pressed && wasGrounded && !sim.grounded) Sfx.jump();
+  return ev;
+}
+
+function camera() {
+  const r = sim.room;
+  return {
+    x: Math.max(0, Math.min(r.width - W, sim.player.x - W / 2)),
+    y: Math.max(0, Math.min(r.height - H, sim.player.y - H / 2)),
+  };
+}
+
+function updateRoom() {
+  const cam = camera();
+  const k = c => keysDown.has(c);
+  const ev = sim.update(DT, {
+    moveX: (k('KeyD') || k('ArrowRight') ? 1 : 0) - (k('KeyA') || k('ArrowLeft') ? 1 : 0),
+    moveY: (k('KeyS') || k('ArrowDown') ? 1 : 0) - (k('KeyW') || k('ArrowUp') ? 1 : 0),
+    aimX: mouse.x + cam.x,
+    aimY: mouse.y + cam.y,
+    fire: mouse.down,
+  });
+  for (const f of sim.fx) {
+    if (f.type === 'shoot') Sfx.shoot();
+    else if (f.type === 'hit') { Sfx.enemyHit(); burst(f.x, f.y, '#a7f070', 3); }
+    else if (f.type === 'kill') { Sfx.kill(); burst(f.x, f.y, '#a7f070', 10); }
+    else if (f.type === 'hurt') { Sfx.hit(); shake = 0.15; }
+  }
+  sim.fx.length = 0;
+  if (roomHelp > 0) roomHelp -= DT;
+  updateParticles();
+  return ev === 'lost' ? 'hit' : ev;
+}
+
+// Small visual particles (not part of the simulation).
+let particles = [];
+function burst(x, y, color, n) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 30 + Math.random() * 60;
+    particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.3 + Math.random() * 0.2, color });
+  }
+}
+function updateParticles() {
+  for (const p of particles) { p.x += p.vx * DT; p.y += p.vy * DT; p.life -= DT; }
+  particles = particles.filter(p => p.life > 0);
+}
 function update() {
   sceneTime += DT;
   if (wasPressed('KeyM')) { settings.toggleMuted(); Sfx.select(); }
@@ -142,10 +216,7 @@ function update() {
   else if (scene === 'play') {
     if (wasPressed('Escape', 'KeyP')) { scene = 'pause'; sceneTime = 0; }
     else {
-      const pressed = wasPressed(...JUMP_KEYS) || !!click;
-      const wasGrounded = sim.grounded;
-      const ev = sim.update(DT, { pressed });
-      if (pressed && wasGrounded && !sim.grounded) Sfx.jump();
+      const ev = chapterId === 'cleartheroom' ? updateRoom() : updateRunner();
       if (ev === 'hit') {
         Sfx.hit(); shake = 0.3; deathTimer = 0.9; scene = 'dying'; sceneTime = 0;
         if (mode === 'endless') {
@@ -180,7 +251,7 @@ function update() {
       if (clearedChapter || wasPressed('Escape')) toMenu(); else beginLevel();
     }
   } else if (scene === 'over') {
-    if (sceneTime > 0.4 && (wasPressed('Enter', 'Space') || click)) { if (mode === 'endless') startEndless(); else startJumpGuy(); }
+    if (sceneTime > 0.4 && (wasPressed('Enter', 'Space') || click)) { if (mode === 'endless') startEndless(); else startChapter(chapterId); }
     else if (wasPressed('Escape')) toMenu();
   }
   pressedKeys.clear(); click = null;
@@ -268,11 +339,72 @@ function drawLevel() {
   }
 }
 
+const GRUNT = [
+  '.gggggg.',
+  'gggggggg',
+  'geggggeg',
+  'gggggggg',
+  '.gggggg.',
+  '.g.gg.g.',
+];
+const GRUNT_PAL = { g: '#38b764', e: '#1a1c2c' };
+const HERO = [
+  '..hhhh..',
+  '.hssssh.',
+  '.sesses.',
+  '..ssss..',
+  '.bbbbbb.',
+  'sbbbbbbs',
+  '.bb..bb.',
+  '.dd..dd.',
+];
+
+function drawRoom() {
+  const cam = camera(), r = sim.room, T = ClearTheRoom.TILE;
+  ctx.fillStyle = '#1a1c2c'; ctx.fillRect(0, 0, W, H);
+  const i0 = Math.floor(cam.x / T), i1 = Math.ceil((cam.x + W) / T), j0 = Math.floor(cam.y / T), j1 = Math.ceil((cam.y + H) / T);
+  for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
+    const x = Math.round(i * T - cam.x), y = Math.round(j * T - cam.y);
+    if (r.solid[j] && r.solid[j][i]) {
+      ctx.fillStyle = '#566c86'; ctx.fillRect(x, y, T, T);
+      ctx.fillStyle = '#94a3b8'; ctx.fillRect(x, y, T, 2);
+      ctx.fillStyle = '#333c57'; ctx.fillRect(x, y + T - 3, T, 3);
+    } else {
+      ctx.fillStyle = (i + j) % 2 ? '#29366f' : '#2f3d7c'; ctx.fillRect(x, y, T, T);
+    }
+  }
+  // enemies (blinking outline while they spawn)
+  for (const e of sim.enemies) {
+    const x = Math.round(e.x - cam.x - 8), y = Math.round(e.y - cam.y - 8);
+    if (e.spawnT > 0) {
+      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = '#a7f070'; ctx.strokeRect(x + 2.5, y + 2.5, 11, 11); }
+      continue;
+    }
+    pixels(GRUNT, e.flash > 0 ? { g: '#ffffff', e: '#ffffff' } : GRUNT_PAL, x + 1, y + 2, 2);
+  }
+  for (const b of sim.bullets) { ctx.fillStyle = '#ffcd75'; ctx.fillRect(Math.round(b.x - cam.x - 1.5), Math.round(b.y - cam.y - 1.5), 3, 3); }
+  // player (blinks while invulnerable)
+  const p = sim.player;
+  if (!(p.invuln > 0 && Math.floor(p.invuln * 15) % 2)) pixels(HERO, PAL, Math.round(p.x - cam.x - 8), Math.round(p.y - cam.y - 8), 2);
+  for (const q of particles) { ctx.fillStyle = q.color; ctx.fillRect(Math.round(q.x - cam.x), Math.round(q.y - cam.y), 2, 2); }
+  // crosshair at the mouse position
+  if (scene === 'play') {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(Math.round(mouse.x) - 3, Math.round(mouse.y), 7, 1); ctx.fillRect(Math.round(mouse.x), Math.round(mouse.y) - 3, 1, 7);
+  }
+}
+
 function drawLives() {
   if (mode === 'endless') {
     text('ONE LIFE', 6, 6, '#fff', 8);
     text(meters(sim.dist) + ' M', W - 6, 6, '#fff', 8, 'right');
     text('BEST ' + progression.record('jumpguy') + ' M', W - 6, 18, '#ffcd75', 8, 'right');
+    return;
+  }
+  if (chapterId === 'cleartheroom') {
+    for (let i = 0; i < sim.player.maxHp; i++) pixels(HEART, { r: i < sim.player.hp ? '#ef4444' : '#333c57' }, 6 + i * 10, 5);
+    text('LIVES ' + hud.lives, 6, 16, '#fff', 8);
+    text('LEVEL ' + hud.level + '/' + CHAPTERS.find(c => c.id === chapterId).levels, W - 6, 6, '#fff', 8, 'right');
     return;
   }
   text('LIVES', 6, 6, '#fff', 8);
@@ -283,6 +415,11 @@ function drawProgressBar() {
   const p = Math.min(1, (sim.dist + JumpGuy.PLAYER_X) / sim.def.length);
   ctx.fillStyle = '#000'; ctx.fillRect(90, 18, 140, 4);
   ctx.fillStyle = '#ffcd75'; ctx.fillRect(91, 19, Math.round(138 * p), 2);
+}
+
+function chapterEndText() {
+  const i = CHAPTERS.findIndex(c => c.id === chapterId), next = CHAPTERS[i + 1];
+  return 'CHAPTER ' + (i + 1) + ' COMPLETE' + (next ? ' - CHAPTER ' + (i + 2) + ' UNLOCKED' : '');
 }
 
 function panel(title, lines, color) {
@@ -329,11 +466,13 @@ function drawMenu() {
 }
 
 function draw() {
+  canvas.style.cursor = scene === 'play' && chapterId === 'cleartheroom' ? 'none' : '';
   ctx.setTransform(VIEW_SCALE, 0, 0, VIEW_SCALE, 0, 0);
   ctx.imageSmoothingEnabled = false;
   ctx.save();
   if (shake > 0) ctx.translate(Math.round((Math.random() - 0.5) * 6), Math.round((Math.random() - 0.5) * 6));
   if (scene === 'menu' || scene === 'confirm') drawMenu();
+  else if (chapterId === 'cleartheroom') drawRoom();
   else drawLevel();
   ctx.restore();
   if (scene === 'confirm') {
@@ -350,10 +489,14 @@ function draw() {
     return;
   }
   if (scene === 'play') {
-    if (mode === 'chapter') drawProgressBar();
-    if (sim.dist < 120) text('SPACE / UP / CLICK TO JUMP', W / 2, 30, '#fff', 8, 'center');
+    if (chapterId === 'cleartheroom') {
+      if (roomHelp > 0) text('WASD MOVE   MOUSE AIM + HOLD CLICK TO SHOOT', W / 2, 160, '#fff', 8, 'center');
+    } else {
+      if (mode === 'chapter') drawProgressBar();
+      if (sim.dist < 120) text('SPACE / UP / CLICK TO JUMP', W / 2, 30, '#fff', 8, 'center');
+    }
   } else if (scene === 'cleared') {
-    panel(clearedChapter ? 'CHAPTER CLEARED!' : 'LEVEL CLEARED!', [clearedChapter ? 'CHAPTER 1 COMPLETE - CHAPTER 2 UNLOCKED' : 'GET READY FOR THE NEXT LEVEL', '', clearedChapter ? 'PRESS ENTER OR CLICK FOR THE MENU' : 'ENTER / CLICK: NEXT LEVEL   ESC: MENU'], '#a7f070');
+    panel(clearedChapter ? 'CHAPTER CLEARED!' : 'LEVEL CLEARED!', [clearedChapter ? chapterEndText() : 'GET READY FOR THE NEXT LEVEL', '', clearedChapter ? 'PRESS ENTER OR CLICK FOR THE MENU' : 'ENTER / CLICK: NEXT LEVEL   ESC: MENU'], '#a7f070');
   } else if (scene === 'over') {
     if (mode === 'endless') {
       const r = endlessResult;

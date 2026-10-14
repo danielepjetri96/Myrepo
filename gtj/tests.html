@@ -15,6 +15,8 @@
 <script src="progression.js"></script>
 <script src="settings.js"></script>
 <script src="jumpguy-data.js"></script>
+<script src="cleartheroom-data.js"></script>
+<script src="cleartheroom.js"></script>
 <script src="jumpguy.js"></script>
 <script>
 // Tiny test runner: open this file in a browser, no server needed.
@@ -488,6 +490,153 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
   eq(p.isChapterUnlocked('b'), true);
   eq(p.record('a'), 40);
 });
+
+// ---- Clear the Room ----
+{
+  const D = ClearTheRoomData, LAYOUT = D.layouts[0];
+  const mk = waves => ClearTheRoom.create({ layout: LAYOUT, waves: waves || [['grunt']] });
+  const idle = { moveX: 0, moveY: 0, aimX: 0, aimY: 0, fire: false };
+  const step = (sim, input, n) => { let ev = null; for (let i = 0; i < (n || 1) && !ev; i++) ev = sim.update(STEP, Object.assign({}, idle, input)); return ev; };
+  const spawnNow = (sim, id, x, y) => { const d = D.enemies[id]; const e = { type: id, x, y, size: d.size, hp: d.hp, speed: d.speed, damage: d.damage, spawnT: 0, flash: 0 }; sim.enemies.push(e); return e; };
+
+  test('ctr layouts: valid size, closed by walls, one start, enough spawn points, everything reachable', () => {
+    for (const rows of D.layouts) {
+      eq(rows.length, 18); for (const r of rows) eq(r.length, 32, 'row width');
+      const room = ClearTheRoom.parseLayout(rows);
+      eq(room.width, 640); eq(room.height, 360);
+      eq(rows[0], '#'.repeat(32), 'top wall'); eq(rows[17], '#'.repeat(32), 'bottom wall');
+      for (const r of rows) eq(r[0] + r[31], '##', 'side walls');
+      eq(rows.join('').split('P').length - 1, 1, 'one player start');
+      eq(room.spawns.length >= 4, true, 'spawn points');
+      const seen = new Set(), todo = [[Math.floor(room.start.x / 20), Math.floor(room.start.y / 20)]];
+      while (todo.length) {
+        const [i, j] = todo.pop(), k = i + ',' + j;
+        if (seen.has(k) || room.solid[j][i]) continue;
+        seen.add(k); todo.push([i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]);
+      }
+      const floor = rows.join('').split('').filter(ch => ch !== '#').length;
+      eq(seen.size, floor, 'every floor tile reachable');
+    }
+  });
+
+  test('ctr: the player starts at full health and moves with the keys at the set speed', () => {
+    const sim = mk(); sim.player.x = 160; sim.player.y = 310; const x0 = sim.player.x;
+    eq(sim.player.hp, D.player.maxHp);
+    step(sim, { moveX: 1 }, 60);
+    eq(Math.abs(sim.player.x - x0 - D.player.speed) < 1, true, 'one second of movement');
+  });
+
+  test('ctr: diagonal movement is not faster than straight movement', () => {
+    const sim = mk(); sim.player.x = 160; sim.player.y = 310; const { x, y } = sim.player;
+    step(sim, { moveX: 1, moveY: -1 }, 30);
+    eq(Math.abs(Math.hypot(sim.player.x - x, sim.player.y - y) - D.player.speed / 2) < 1, true);
+  });
+
+  test('ctr: walls stop the player and let it slide along them', () => {
+    const sim = mk(); sim.player.x = 30; sim.player.y = 30;
+    step(sim, { moveX: -1, moveY: 1 }, 120);
+    eq(sim.player.x >= 20 + D.player.size / 2 - 0.01, true, 'did not enter the left wall');
+    eq(sim.player.y > 100, true, 'kept sliding down along it');
+  });
+
+  test('ctr: holding fire shoots at the set rate, in the aimed direction', () => {
+    const sim = mk([[]]); const p = sim.player;
+    step(sim, { fire: true, aimX: p.x + 100, aimY: p.y }, 60);
+    eq(sim.fx.filter(f => f.type === 'shoot').length, D.player.fireRate, 'shots in one second');
+    eq(sim.bullets.every(b => b.vy === 0 && b.vx > 0), true);
+    const none = mk(); step(none, { fire: false }, 60); eq(none.bullets.length, 0);
+  });
+
+  test('ctr: bullets disappear at their range and on walls', () => {
+    const sim = mk([[]]); const p = sim.player;
+    step(sim, { fire: true, aimX: p.x, aimY: p.y - 100 }, 1);
+    step(sim, { aimX: p.x, aimY: p.y - 100 }, 120);
+    eq(sim.bullets.length, 0);
+  });
+
+  test('ctr: a grunt dies after as many hits as its health', () => {
+    const sim = mk(); const e = spawnNow(sim, 'grunt', sim.player.x + 60, sim.player.y);
+    e.speed = 0;
+    const hp = D.enemies.grunt.hp;
+    for (let n = 1; n <= hp; n++) {
+      step(sim, { fire: true, aimX: e.x, aimY: e.y }, n === 1 ? 20 : 15);
+      eq(sim.enemies.includes(e), n < hp, 'alive after hit ' + n);
+    }
+    eq(sim.fx.some(f => f.type === 'kill'), true);
+  });
+
+  test('ctr: enemies still spawning cannot be hit and do not move', () => {
+    const sim = mk(); const e = spawnNow(sim, 'grunt', sim.player.x + 60, sim.player.y);
+    e.spawnT = 1; const hp = e.hp, ex = e.x;
+    step(sim, { fire: true, aimX: e.x, aimY: e.y }, 30);
+    eq(e.hp, hp); eq(e.x, ex);
+  });
+
+  test('ctr: a grunt chases the player', () => {
+    const sim = mk(); sim.player.x = 100; sim.player.y = 310; const e = spawnNow(sim, 'grunt', 400, 310);
+    const d0 = Math.hypot(sim.player.x - e.x, sim.player.y - e.y);
+    step(sim, {}, 60);
+    const d1 = Math.hypot(sim.player.x - e.x, sim.player.y - e.y);
+    eq(Math.abs((d0 - d1) - D.enemies.grunt.speed) < 8, true, 'closed about its speed in one second');
+  });
+
+  test('ctr: contact costs 1 heart, then 1 s of invulnerability', () => {
+    const sim = mk(); const e = spawnNow(sim, 'grunt', sim.player.x + 4, sim.player.y); e.speed = 0;
+    step(sim, {}, 1); eq(sim.player.hp, D.player.maxHp - 1);
+    step(sim, {}, 50); eq(sim.player.hp, D.player.maxHp - 1, 'invulnerable');
+    step(sim, {}, 20); eq(sim.player.hp, D.player.maxHp - 2, 'hit again after 1 s');
+  });
+
+  test('ctr: health reaching zero reports lost once and freezes the room', () => {
+    const sim = mk(); const e = spawnNow(sim, 'grunt', sim.player.x + 4, sim.player.y); e.speed = 0;
+    let lost = 0; for (let i = 0; i < 60 * 8; i++) if (sim.update(STEP, idle) === 'lost') lost++;
+    eq(lost, 1); eq(sim.state, 'lost'); eq(sim.player.hp, 0);
+    eq(sim.update(STEP, idle), null);
+  });
+
+  test('ctr: waves come one at a time, the next only after the previous is cleared', () => {
+    const sim = mk([['grunt', 'grunt'], ['grunt']]);
+    step(sim, {}, 61); eq(sim.enemies.length, 2, 'first wave');
+    step(sim, {}, 120); eq(sim.enemies.length, 2, 'second wave waits');
+    sim.enemies.length = 0; step(sim, {}, 61); eq(sim.enemies.length, 1, 'second wave after clearing');
+  });
+
+  test('ctr: clearing every wave reports passed, once', () => {
+    const sim = mk([['grunt']]);
+    step(sim, {}, 61); sim.enemies.length = 0;
+    let passed = 0; for (let i = 0; i < 120; i++) if (sim.update(STEP, idle) === 'passed') passed++;
+    eq(passed, 1); eq(sim.state, 'passed'); eq(sim.update(STEP, idle), null);
+  });
+
+  test('ctr: buildWaves follows the level config', () => {
+    const cfg = D.levels[0], waves = ClearTheRoom.buildWaves(cfg, seeded(9));
+    eq(waves.length, cfg.waves);
+    for (const w of waves) { eq(w.length >= cfg.perWave[0] && w.length <= cfg.perWave[1], true); eq(w.every(id => id in cfg.types), true); }
+  });
+
+  test('ctr: a grunt walks around walls to reach a player it cannot see in a straight line', () => {
+    const sim = mk(); sim.player.x = 367; sim.player.y = 128;
+    const e = spawnNow(sim, 'grunt', 214, 128);
+    step(sim, {}, 60 * 20);
+    eq(sim.player.hp < D.player.maxHp, true, 'it reached the player');
+  });
+
+  test('ctr: a bot that shoots the nearest enemy and keeps its distance clears level 1', () => {
+    for (let seed = 1; seed <= 5; seed++) {
+      const sim = ClearTheRoom.create({ layout: LAYOUT, waves: ClearTheRoom.buildWaves(D.levels[0], seeded(seed)) });
+      let ev = null;
+      for (let i = 0; i < 60 * 120 && !ev; i++) {
+        const p = sim.player, live = sim.enemies.filter(e => e.spawnT <= 0);
+        const near = live.slice().sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+        let mx = 0, my = 0;
+        if (near) { const dx = p.x - near.x, dy = p.y - near.y, d = Math.hypot(dx, dy) || 1; if (d < 110) { mx = dx / d + (-dy / d) * 0.6; my = dy / d + (dx / d) * 0.6; } }
+        if (near && Math.hypot(mx, my) > 0 && sim.room.hits(p.x + mx * 8, p.y + my * 8, 6)) { mx = 320 - p.x; my = 180 - p.y; }
+        ev = sim.update(STEP, { moveX: mx, moveY: my, aimX: near ? near.x : p.x + 1, aimY: near ? near.y : p.y, fire: !!near });
+      }
+      eq(ev, 'passed', 'seed ' + seed);
+    }
+  });
+}
 
 // ---- report ----
 const failed = results.filter(r => !r.ok).length;
