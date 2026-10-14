@@ -10,6 +10,15 @@ const JumpGuyData = {
     { speed: 150, length: 2700, maxTier: 3, gapExtra: [0, 50] },
   ],
 
+  // Endless mode: speed ramps linearly over rampDistance px up to maxSpeed. Harder pattern tiers appear at the
+  // distances in tierAt (tier 2, then tier 3). The gap between patterns goes from gapExtraStart to gapExtraEnd.
+  endless: {
+    startSpeed: 90, maxSpeed: 150, rampDistance: 5000,
+    tierAt: [1000, 2500],
+    gapExtraStart: [70, 150], gapExtraEnd: [0, 50],
+    metersPerPx: 0.1,          // score unit: 1 metre = 10 px
+  },
+
   // Obstacle patterns, picked in random order. Each obstacle is [dx, w, h] relative to the pattern start.
   // tier: 1 easy, 2 medium, 3 hard. Every pattern must stay clearable with a single jump (checked by tests.html).
   patterns: [

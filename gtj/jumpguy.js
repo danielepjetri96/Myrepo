@@ -34,6 +34,39 @@ const JumpGuy = {
     return { length: cfg.length, speed: cfg.speed, obstacles, groups };
   },
 
+  // Endless course: generated on demand as the runner advances, speed ramping up to a maximum (see JumpGuyData.endless).
+  // The returned def has length Infinity; `extend(dist)` adds obstacles ahead and drops those far behind.
+  buildEndless(rng) {
+    const J = JumpGuy, E = JumpGuyData.endless;
+    rng = rng || Math.random;
+    const ramp = d => Math.min(1, d / E.rampDistance);
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const def = {
+      length: Infinity,
+      speed: E.startSpeed,
+      speedAt: d => lerp(E.startSpeed, E.maxSpeed, ramp(d)),
+      obstacles: [],
+      groups: [],
+    };
+    let x = J.LEAD_IN;
+    def.extend = dist => {
+      while (x < dist + 500) {
+        const tier = 1 + E.tierAt.filter(d => x >= d).length;
+        const pool = JumpGuyData.patterns.filter(p => p.tier <= tier);
+        const p = pool[Math.floor(rng() * pool.length)];
+        const span = Math.max(...p.o.map(([dx, w]) => dx + w));
+        for (const [dx, w, h] of p.o) def.obstacles.push({ x: x + dx, w, h });
+        def.groups.push({ x, span });
+        const t = ramp(x), lo = lerp(E.gapExtraStart[0], E.gapExtraEnd[0], t), hi = lerp(E.gapExtraStart[1], E.gapExtraEnd[1], t);
+        x += span + Math.round(def.speedAt(x) * J.MIN_GAP + lo + rng() * (hi - lo));
+      }
+      while (def.obstacles.length && def.obstacles[0].x + def.obstacles[0].w < dist - 100) def.obstacles.shift();
+      while (def.groups.length && def.groups[0].x + def.groups[0].span < dist - 100) def.groups.shift();
+    };
+    def.extend(0);
+    return def;
+  },
+
   create(def) {
     const J = JumpGuy;
     const sim = {
@@ -66,7 +99,8 @@ const JumpGuy = {
         if (sim.y >= J.GROUND) { sim.y = J.GROUND; sim.vy = 0; sim.grounded = true; }
         else sim.grounded = false;
 
-        sim.dist += def.speed * dt;
+        if (def.extend) def.extend(sim.dist);
+        sim.dist += (def.speedAt ? def.speedAt(sim.dist) : def.speed) * dt;
 
         if (sim.hitsObstacle()) { sim.state = 'hit'; return 'hit'; }
         if (sim.dist + J.PLAYER_X >= def.length) { sim.state = 'passed'; return 'passed'; }

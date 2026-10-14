@@ -60,12 +60,14 @@ let scene = 'menu';           // menu | play | dying | cleared | over
 let menuIndex = 0;
 let hud = { lives: 0, level: 1 };   // what the HUD shows, kept apart from Progression (which resets on game over)
 let clearedChapter = false;
+let mode = 'chapter';               // chapter | endless
+let endlessResult = null;           // { score, record, newRecord } after an endless run
 let sim = null, deathTimer = 0, sceneTime = 0, shake = 0, gameOver = false;
 
 function startJumpGuy() {
   let run = progression.run;
   if (!(run && run.chapter === 'jumpguy' && JumpGuyData.levels[run.level - 1])) { progression.startChapter('jumpguy'); run = progression.run; }
-  if (run) beginLevel();
+  if (run) { mode = 'chapter'; beginLevel(); }
 }
 function beginLevel() {
   const run = progression.run;
@@ -73,26 +75,44 @@ function beginLevel() {
   hud = { lives: run.lives, level: run.level };
   scene = 'play'; sceneTime = 0; gameOver = false;
 }
+function startEndless() {
+  mode = 'endless'; endlessResult = null;
+  sim = JumpGuy.create(JumpGuy.buildEndless());
+  scene = 'play'; sceneTime = 0; gameOver = false;
+}
+const meters = dist => Math.floor(dist * JumpGuyData.endless.metersPerPx);
 function toMenu() { scene = 'menu'; sceneTime = 0; }
 
 // ---- menu ----
-const CARD = i => ({ x: 40, y: 56 + i * 36, w: 240, h: 30 });
+// Menu rows: the three chapters, with Jump Guy's Endless right after Jump Guy.
+const MENU = [
+  { kind: 'chapter', i: 0 },
+  { kind: 'endless', id: 'jumpguy', name: 'JUMP GUY ENDLESS' },
+  { kind: 'chapter', i: 1 },
+  { kind: 'chapter', i: 2 },
+];
+const CARD = i => ({ x: 40, y: 50 + i * 28, w: 240, h: 24 });
 const inRect = (p, r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
 
-function activateChapter(i) {
-  const c = CHAPTERS[i];
+function activateItem(i) {
+  const item = MENU[i];
+  if (item.kind === 'endless') {
+    if (!progression.isEndlessUnlocked(item.id)) { Sfx.deny(); return; }
+    Sfx.select(); startEndless(); return;
+  }
+  const c = CHAPTERS[item.i];
   if (!progression.isChapterUnlocked(c.id) || !PLAYABLE[c.id]) { Sfx.deny(); return; }
   Sfx.select();
   startJumpGuy();
 }
 
 function updateMenu() {
-  const n = CHAPTERS.length;
+  const n = MENU.length;
   if (wasPressed('ArrowDown', 'KeyS')) menuIndex = (menuIndex + 1) % n;
   if (wasPressed('ArrowUp', 'KeyW')) menuIndex = (menuIndex + n - 1) % n;
   if (click) {
-    for (let i = 0; i < n; i++) if (inRect(click, CARD(i))) { menuIndex = i; activateChapter(i); break; }
-  } else if (wasPressed('Enter', 'Space')) activateChapter(menuIndex);
+    for (let i = 0; i < n; i++) if (inRect(click, CARD(i))) { menuIndex = i; activateItem(i); break; }
+  } else if (wasPressed('Enter', 'Space')) activateItem(menuIndex);
 }
 
 // ---- update (fixed 60 Hz) ----
@@ -110,9 +130,16 @@ function update() {
       if (pressed && wasGrounded && !sim.grounded) Sfx.jump();
       if (ev === 'hit') {
         Sfx.hit(); shake = 0.3; deathTimer = 0.9; scene = 'dying'; sceneTime = 0;
-        hud.lives = Math.max(0, hud.lives - 1);
-        const lost = progression.lifeLost();
-        gameOver = !!(lost && lost.gameOver);
+        if (mode === 'endless') {
+          const score = meters(sim.dist);
+          const newRecord = progression.submitEndless('jumpguy', score);
+          endlessResult = { score, record: progression.record('jumpguy'), newRecord };
+          gameOver = true;
+        } else {
+          hud.lives = Math.max(0, hud.lives - 1);
+          const lost = progression.lifeLost();
+          gameOver = !!(lost && lost.gameOver);
+        }
       } else if (ev === 'passed') {
         Sfx.win(); const passed = progression.levelPassed(); clearedChapter = !!(passed && passed.chapterCompleted); scene = 'cleared'; sceneTime = 0;
       }
@@ -128,7 +155,7 @@ function update() {
       if (clearedChapter || wasPressed('Escape')) toMenu(); else beginLevel();
     }
   } else if (scene === 'over') {
-    if (sceneTime > 0.4 && (wasPressed('Enter', 'Space') || click)) startJumpGuy();
+    if (sceneTime > 0.4 && (wasPressed('Enter', 'Space') || click)) { if (mode === 'endless') startEndless(); else startJumpGuy(); }
     else if (wasPressed('Escape')) toMenu();
   }
   pressedKeys.clear(); click = null;
@@ -217,6 +244,12 @@ function drawLevel() {
 }
 
 function drawLives() {
+  if (mode === 'endless') {
+    text('ONE LIFE', 6, 6, '#fff', 8);
+    text(meters(sim.dist) + ' M', W - 6, 6, '#fff', 8, 'right');
+    text('BEST ' + progression.record('jumpguy') + ' M', W - 6, 18, '#ffcd75', 8, 'right');
+    return;
+  }
   text('LIVES', 6, 6, '#fff', 8);
   for (let i = 0; i < Progression.LIVES; i++) pixels(HEART, { r: i < hud.lives ? '#ef4444' : '#333c57' }, 46 + i * 10, 5);
   text('LEVEL ' + hud.level + '/' + JumpGuyData.levels.length, W - 6, 6, '#fff', 8, 'right');
@@ -236,19 +269,28 @@ function panel(title, lines, color) {
 function drawMenu() {
   drawBackground(sceneTime * 40); drawGround(sceneTime * 40);
   text('GtJ', W / 2, 8, '#ffcd75', 26, 'center');
-  text('SELECT A CHAPTER', W / 2, 40, '#fff', 8, 'center');
-  CHAPTERS.forEach((c, i) => {
-    const r = CARD(i), unlocked = progression.isChapterUnlocked(c.id);
+  text('SELECT A CHAPTER', W / 2, 36, '#fff', 8, 'center');
+  MENU.forEach((item, i) => {
+    const r = CARD(i);
+    let title, sub, unlocked;
+    if (item.kind === 'endless') {
+      unlocked = progression.isEndlessUnlocked(item.id);
+      title = '   ' + item.name;
+      sub = unlocked ? 'BEST: ' + progression.record(item.id) + ' M' : 'LOCKED - COMPLETE JUMP GUY';
+    } else {
+      const c = CHAPTERS[item.i];
+      unlocked = progression.isChapterUnlocked(c.id);
+      title = (item.i + 1) + '. ' + c.name;
+      if (!unlocked) sub = 'LOCKED';
+      else if (!PLAYABLE[c.id]) sub = 'COMING SOON';
+      else if (progression.isChapterCompleted(c.id)) sub = 'COMPLETED - PLAY AGAIN';
+      else if (progression.run && progression.run.chapter === c.id) sub = 'CONTINUE - LEVEL ' + progression.run.level + ', ' + progression.run.lives + ' LIVES';
+      else sub = 'NEW GAME';
+    }
     ctx.fillStyle = i === menuIndex && unlocked ? '#ffcd75' : '#1a1c2c'; ctx.fillRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
     ctx.fillStyle = unlocked ? '#3b5dc9' : '#333c57'; ctx.fillRect(r.x, r.y, r.w, r.h);
-    text((i + 1) + '. ' + c.name, r.x + 10, r.y + 4, unlocked ? '#fff' : '#94a3b8', 10);
-    let sub;
-    if (!unlocked) sub = 'LOCKED';
-    else if (!PLAYABLE[c.id]) sub = 'COMING SOON';
-    else if (progression.isChapterCompleted(c.id)) sub = 'COMPLETED - PLAY AGAIN';
-    else if (progression.run && progression.run.chapter === c.id) sub = 'CONTINUE - LEVEL ' + progression.run.level + ', ' + progression.run.lives + ' LIVES';
-    else sub = 'NEW GAME';
-    text(sub, r.x + 10, r.y + 18, unlocked ? '#a7f070' : '#94a3b8', 8);
+    text(title, r.x + 8, r.y + 3, unlocked ? '#fff' : '#94a3b8', 8);
+    text(sub, r.x + 8, r.y + 13, unlocked ? '#a7f070' : '#94a3b8', 8);
   });
   text('UP/DOWN + ENTER, OR CLICK', W / 2, 166, '#cbd5e1', 8, 'center');
 }
@@ -264,12 +306,17 @@ function draw() {
   if (scene === 'menu') return;
   drawLives();
   if (scene === 'play') {
-    drawProgressBar();
+    if (mode === 'chapter') drawProgressBar();
     if (sim.dist < 120) text('SPACE / UP / CLICK TO JUMP', W / 2, 30, '#fff', 8, 'center');
   } else if (scene === 'cleared') {
     panel(clearedChapter ? 'CHAPTER CLEARED!' : 'LEVEL CLEARED!', [clearedChapter ? 'CHAPTER 1 COMPLETE - CHAPTER 2 UNLOCKED' : 'GET READY FOR THE NEXT LEVEL', '', clearedChapter ? 'PRESS ENTER OR CLICK FOR THE MENU' : 'ENTER / CLICK: NEXT LEVEL   ESC: MENU'], '#a7f070');
   } else if (scene === 'over') {
-    panel('GAME OVER', ['NO LIVES LEFT', 'YOU RESTART FROM LEVEL 1', '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], '#ef4444');
+    if (mode === 'endless') {
+      const r = endlessResult;
+      panel(r.newRecord ? 'NEW RECORD!' : 'GAME OVER', ['DISTANCE: ' + r.score + ' M', r.newRecord ? 'BEST BEATEN' : 'BEST: ' + r.record + ' M', '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], r.newRecord ? '#ffcd75' : '#ef4444');
+    } else {
+      panel('GAME OVER', ['NO LIVES LEFT', 'YOU RESTART FROM LEVEL 1', '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], '#ef4444');
+    }
   }
 }
 

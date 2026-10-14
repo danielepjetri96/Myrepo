@@ -312,7 +312,7 @@ const bot = sim => {
   if (!sim.grounded) return false;
   const rear = sim.dist + JumpGuy.PLAYER_X, center = rear + JumpGuy.PLAYER_W / 2;
   const g = sim.def.groups.find(g => g.x + g.span > rear);
-  return !!g && g.x + g.span / 2 - center <= sim.def.speed * 0.37;
+  return !!g && g.x + g.span / 2 - center <= (sim.def.speedAt ? sim.def.speedAt(sim.dist) : sim.def.speed) * 0.37;
 };
 
 test('doing nothing hits the first obstacle', () => {
@@ -409,6 +409,37 @@ test('the bot clears every level from several random layouts', () => {
   for (let n = 1; n <= JumpGuyData.levels.length; n++) {
     for (let seed = 1; seed <= 5; seed++) eq(runBot(JumpGuy.buildLevel(n, seeded(seed * 7 + n)), bot, 9000).ev, 'passed', 'level ' + n + ' seed ' + seed);
   }
+});
+
+test('endless: speed grows up to the maximum and never beyond', () => {
+  const def = JumpGuy.buildEndless(seeded(3)), E = JumpGuyData.endless;
+  eq(def.speedAt(0), E.startSpeed);
+  eq(def.speedAt(E.rampDistance / 2) > E.startSpeed && def.speedAt(E.rampDistance / 2) < E.maxSpeed, true);
+  eq(def.speedAt(E.rampDistance), E.maxSpeed);
+  eq(def.speedAt(1e7), E.maxSpeed);
+});
+
+test('endless: obstacles keep appearing ahead and old ones are dropped', () => {
+  const sim = JumpGuy.create(JumpGuy.buildEndless(seeded(4)));
+  for (let i = 0; i < 20000; i++) {
+    sim.update(STEP, { pressed: bot(sim) });
+    if (sim.state === 'hit') throw new Error('bot hit at step ' + i);
+  }
+  eq(sim.dist > 20000, true, 'travelled far');
+  eq(sim.def.obstacles.length < 60, true, 'old obstacles pruned: ' + sim.def.obstacles.length);
+  eq(sim.def.obstacles.some(o => o.x > sim.dist + 64), true, 'obstacles ahead');
+});
+
+test('endless: standing still ends the run on the first obstacle', () => {
+  eq(runBot(JumpGuy.buildEndless(seeded(5)), null, 4000).ev, 'hit');
+});
+
+test('endless: harder patterns only appear after their distance', () => {
+  const def = JumpGuy.buildEndless(seeded(6)), E = JumpGuyData.endless;
+  def.extend(E.tierAt[0] - 600);
+  const maxEarly = Math.max(...def.obstacles.map(o => o.h));
+  const tier1 = Math.max(...JumpGuyData.patterns.filter(p => p.tier === 1).flatMap(p => p.o.map(o => o[2])));
+  eq(maxEarly <= tier1, true);
 });
 
 // ---- report ----
