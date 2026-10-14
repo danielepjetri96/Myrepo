@@ -59,9 +59,9 @@ const JumpGuy = {
       hitsObstacle() {
         const f = J.FORGIVE;
         const left = sim.dist + J.PLAYER_X + f, right = sim.dist + J.PLAYER_X + J.PLAYER_W - f;
-        const bottom = sim.y, top = sim.y - J.PLAYER_H + f;
+        const bottom = sim.y - f;
         for (const o of def.obstacles) {
-          if (right > o.x + f && left < o.x + o.w - f && bottom > J.GROUND - o.h + f && top < J.GROUND) return true;
+          if (right > o.x + f && left < o.x + o.w - f && bottom > J.GROUND - o.h + f) return true;
         }
         return false;
       },

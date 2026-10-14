@@ -292,13 +292,13 @@ test('endless scores that are not finite numbers are ignored', () => {
 
 
 // ---- Jump Guy ----
-const DT = 1 / 60;
+const STEP = 1 / 60;
 const LEVEL1 = JumpGuy.LEVELS[0];
 // Runs a level with a simple bot; jumpWhen(sim) decides when to press.
-function run(def, jumpWhen, maxSteps) {
+function runBot(def, jumpWhen, maxSteps) {
   const sim = JumpGuy.create(def);
   for (let i = 0; i < (maxSteps || 4000); i++) {
-    const ev = sim.update(DT, { pressed: !!jumpWhen && jumpWhen(sim) });
+    const ev = sim.update(STEP, { pressed: !!jumpWhen && jumpWhen(sim) });
     if (ev) return { ev, sim, steps: i + 1 };
   }
   return { ev: null, sim };
@@ -311,46 +311,46 @@ function nextObstacleGap(sim) {
 const bot = sim => sim.grounded && nextObstacleGap(sim) < 24 && nextObstacleGap(sim) > 0;
 
 test('doing nothing hits the first obstacle', () => {
-  const r = run(LEVEL1, null);
+  const r = runBot(LEVEL1, null);
   eq(r.ev, 'hit');
   eq(r.sim.state, 'hit');
 });
 
 test('jumping before each obstacle reaches the finish', () => {
-  const r = run(LEVEL1, bot);
+  const r = runBot(LEVEL1, bot);
   eq(r.ev, 'passed');
 });
 
 test('a finished level reports its event only once', () => {
-  const r = run(LEVEL1, bot);
-  eq(r.sim.update(DT, { pressed: true }), null);
-  const h = run(LEVEL1, null);
-  eq(h.sim.update(DT, {}), null);
+  const r = runBot(LEVEL1, bot);
+  eq(r.sim.update(STEP, { pressed: true }), null);
+  const h = runBot(LEVEL1, null);
+  eq(h.sim.update(STEP, {}), null);
 });
 
 test('the jump button lifts the runner and gravity brings it back', () => {
   const sim = JumpGuy.create({ length: 9999, obstacles: [] });
-  sim.update(DT, { pressed: true });
+  sim.update(STEP, { pressed: true });
   eq(sim.grounded, false);
   let peak = sim.y;
-  for (let i = 0; i < 120; i++) { sim.update(DT, {}); peak = Math.min(peak, sim.y); }
+  for (let i = 0; i < 120; i++) { sim.update(STEP, {}); peak = Math.min(peak, sim.y); }
   eq(sim.grounded, true);
   eq(peak < JumpGuy.GROUND - 50, true, 'jump is high enough');
 });
 
 test('a jump pressed slightly before landing still fires (buffer)', () => {
   const sim = JumpGuy.create({ length: 9999, obstacles: [] });
-  sim.update(DT, { pressed: true });
-  while (sim.y < JumpGuy.GROUND - 4) sim.update(DT, {}); // nearly landed
-  sim.update(DT, { pressed: true });
-  for (let i = 0; i < 20; i++) sim.update(DT, {});
+  sim.update(STEP, { pressed: true });
+  while (sim.y < JumpGuy.GROUND - 4) sim.update(STEP, {}); // nearly landed
+  sim.update(STEP, { pressed: true });
+  for (let i = 0; i < 20; i++) sim.update(STEP, {});
   eq(sim.grounded, false, 'airborne again after landing');
 });
 
 test('a jump pressed just after leaving the ground still fires (edge tolerance)', () => {
   const sim = JumpGuy.create({ length: 9999, obstacles: [] });
   sim.grounded = false; sim.sinceGround = 0.05; sim.vy = 0; sim.y = JumpGuy.GROUND - 1;
-  sim.update(DT, { pressed: true });
+  sim.update(STEP, { pressed: true });
   eq(sim.vy < 0, true);
 });
 

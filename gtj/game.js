@@ -24,17 +24,17 @@ const Sfx = {
     if (!this.ac) { try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
     if (this.ac && this.ac.state === 'suspended') this.ac.resume();
   },
-  tone(f0, f1, dur, type, vol) {
+  tone(f0, f1, dur, type, vol, delay) {
     if (!this.ac) return;
-    const t = this.ac.currentTime, o = this.ac.createOscillator(), g = this.ac.createGain();
+    const t = this.ac.currentTime + (delay || 0), o = this.ac.createOscillator(), g = this.ac.createGain();
     o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
     g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g); g.connect(this.ac.destination); o.start(t); o.stop(t + dur);
   },
   jump() { this.tone(260, 620, 0.14, 'square', 0.08); },
   hit() { this.tone(220, 40, 0.4, 'sawtooth', 0.14); },
-  win() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => this.tone(f, f, 0.16, 'square', 0.09), i * 110)); },
-  over() { [330, 262, 196, 130].forEach((f, i) => setTimeout(() => this.tone(f, f * 0.9, 0.22, 'triangle', 0.14), i * 180)); },
+  win() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, f, 0.16, 'square', 0.09, i * 0.11)); },
+  over() { [330, 262, 196, 130].forEach((f, i) => this.tone(f, f * 0.9, 0.22, 'triangle', 0.14, i * 0.18)); },
   select() { this.tone(440, 660, 0.08, 'square', 0.07); },
   deny() { this.tone(120, 100, 0.12, 'square', 0.07); },
 };
@@ -58,15 +58,19 @@ const JUMP_KEYS = ['Space', 'ArrowUp', 'KeyW'];
 // ---- state ----
 let scene = 'menu';           // menu | play | dying | cleared | over
 let menuIndex = 0;
+let hud = { lives: 0, level: 1 };   // what the HUD shows, kept apart from Progression (which resets on game over)
+let clearedChapter = false;
 let sim = null, deathTimer = 0, sceneTime = 0, shake = 0, gameOver = false;
 
 function startJumpGuy() {
-  const run = progression.run;
-  if (!(run && run.chapter === 'jumpguy')) progression.startChapter('jumpguy');
-  beginLevel();
+  let run = progression.run;
+  if (!(run && run.chapter === 'jumpguy' && JumpGuy.LEVELS[run.level - 1])) { progression.startChapter('jumpguy'); run = progression.run; }
+  if (run) beginLevel();
 }
 function beginLevel() {
-  sim = JumpGuy.create(JumpGuy.LEVELS[progression.run.level - 1]);
+  const run = progression.run;
+  sim = JumpGuy.create(JumpGuy.LEVELS[run.level - 1]);
+  hud = { lives: run.lives, level: run.level };
   scene = 'play'; sceneTime = 0; gameOver = false;
 }
 function toMenu() { scene = 'menu'; sceneTime = 0; }
@@ -106,9 +110,11 @@ function update() {
       if (pressed && wasGrounded && !sim.grounded) Sfx.jump();
       if (ev === 'hit') {
         Sfx.hit(); shake = 0.3; deathTimer = 0.9; scene = 'dying'; sceneTime = 0;
-        gameOver = !!progression.lifeLost().gameOver;
+        hud.lives = Math.max(0, hud.lives - 1);
+        const lost = progression.lifeLost();
+        gameOver = !!(lost && lost.gameOver);
       } else if (ev === 'passed') {
-        Sfx.win(); progression.levelPassed(); scene = 'cleared'; sceneTime = 0;
+        Sfx.win(); const passed = progression.levelPassed(); clearedChapter = !!(passed && passed.chapterCompleted); scene = 'cleared'; sceneTime = 0;
       }
     }
   } else if (scene === 'dying') {
@@ -209,11 +215,9 @@ function drawLevel() {
 }
 
 function drawLives() {
-  const run = progression.run;
-  const lives = run ? run.lives : 0;
   text('LIVES', 6, 6, '#fff', 8);
-  for (let i = 0; i < Progression.LIVES; i++) pixels(HEART, { r: i < lives ? '#ef4444' : '#333c57' }, 46 + i * 10, 5);
-  if (run) text('LEVEL ' + run.level, W - 6, 6, '#fff', 8, 'right');
+  for (let i = 0; i < Progression.LIVES; i++) pixels(HEART, { r: i < hud.lives ? '#ef4444' : '#333c57' }, 46 + i * 10, 5);
+  text('LEVEL ' + hud.level, W - 6, 6, '#fff', 8, 'right');
 }
 function drawProgressBar() {
   const p = Math.min(1, (sim.dist + JumpGuy.PLAYER_X) / sim.def.length);
@@ -261,7 +265,7 @@ function draw() {
     drawProgressBar();
     if (sim.dist < 120) text('SPACE / UP / CLICK TO JUMP', W / 2, 30, '#fff', 8, 'center');
   } else if (scene === 'cleared') {
-    panel('LEVEL CLEARED!', [progression.isChapterCompleted('jumpguy') ? 'CHAPTER 1 COMPLETE - CHAPTER 2 UNLOCKED' : 'GET READY FOR THE NEXT LEVEL', '', 'PRESS ENTER OR CLICK'], '#a7f070');
+    panel('LEVEL CLEARED!', [clearedChapter ? 'CHAPTER 1 COMPLETE - CHAPTER 2 UNLOCKED' : 'GET READY FOR THE NEXT LEVEL', '', 'PRESS ENTER OR CLICK'], '#a7f070');
   } else if (scene === 'over') {
     panel('GAME OVER', ['NO LIVES LEFT', 'YOU RESTART FROM LEVEL 1', '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], '#ef4444');
   }
