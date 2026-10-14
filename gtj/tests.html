@@ -504,18 +504,23 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
       eq(rows.length, 18); for (const r of rows) eq(r.length, 32, 'row width');
       const room = ClearTheRoom.parseLayout(rows);
       eq(room.width, 640); eq(room.height, 360);
-      eq(rows[0], '#'.repeat(32), 'top wall'); eq(rows[17], '#'.repeat(32), 'bottom wall');
-      for (const r of rows) eq(r[0] + r[31], '##', 'side walls');
+      const walls = r => r.replace(/D/g, '#');
+      eq(walls(rows[0]), '#'.repeat(32), 'top wall'); eq(walls(rows[17]), '#'.repeat(32), 'bottom wall');
+      for (const r of rows) eq(walls(r[0] + r[31]), '##', 'side walls');
+      eq(room.doors.length, 2, 'one two-tile exit door');
+      eq(room.doors.every(d => d.i === 0 || d.i === 31 || d.j === 0 || d.j === 17), true, 'door in the outer wall');
       eq(rows.join('').split('P').length - 1, 1, 'one player start');
       eq(room.spawns.length >= 4, true, 'spawn points');
+      eq(room.spawns.every(s => !room.hits(s.x, s.y, 6)), true, 'spawn points on floor');
+      room.openDoors();
       const seen = new Set(), todo = [[Math.floor(room.start.x / 20), Math.floor(room.start.y / 20)]];
       while (todo.length) {
         const [i, j] = todo.pop(), k = i + ',' + j;
-        if (seen.has(k) || room.solid[j][i]) continue;
+        if (seen.has(k) || !room.solid[j] || room.solid[j][i] !== false) continue;
         seen.add(k); todo.push([i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]);
       }
       const floor = rows.join('').split('').filter(ch => ch !== '#').length;
-      eq(seen.size, floor, 'every floor tile reachable');
+      eq(seen.size, floor, 'every floor tile and the door reachable');
     }
   });
 
@@ -619,6 +624,102 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     const e = spawnNow(sim, 'grunt', 214, 128);
     step(sim, {}, 60 * 20);
     eq(sim.player.hp < D.player.maxHp, true, 'it reached the player');
+  });
+
+  const levelCfg = (rooms, extra) => Object.assign({}, D.levels[0], { rooms }, extra);
+  const clearRoom = (lv) => { lv.sim.waveIndex = 99; lv.sim.enemies.length = 0; };   // pretend every wave is defeated
+  const stepLevel = (lv, input, n) => { let ev = null; for (let i = 0; i < n && !ev; i++) ev = lv.update(STEP, Object.assign({}, idle, input)); return ev; };
+  const doorCenter = room => { const d = room.doors; return { x: (d[0].i + d[1].i + 1) * 10, y: (d[0].j + d[1].j + 1) * 10 }; };
+
+  test('ctr level: has as many rooms as configured and never repeats a layout twice in a row', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const lv = ClearTheRoom.createLevel({ cfg: levelCfg(8), rng: seeded(seed) });
+      eq(lv.roomCount, 8);
+      eq(lv.layoutIndexes.length, 8);
+      for (let k = 1; k < 8; k++) eq(lv.layoutIndexes[k] !== lv.layoutIndexes[k - 1], true, 'seed ' + seed + ' room ' + (k + 1));
+    }
+  });
+
+  test('ctr level: the exit door stays closed until the room is cleared', () => {
+    const lv = ClearTheRoom.createLevel({ cfg: levelCfg(2), rng: seeded(1) });
+    const door = doorCenter(lv.sim.room);
+    lv.sim.player.x = door.x; lv.sim.player.y = door.y;   // standing in the wall: tries to walk out
+    eq(lv.sim.room.hits(door.x, door.y, 5), true, 'the door is solid');
+    eq(stepLevel(lv, {}, 120), null, 'no exit');
+    eq(lv.roomIndex, 0);
+  });
+
+  test('ctr level: clearing a room opens the door and walking through it enters the next room with the same health', () => {
+    const lv = ClearTheRoom.createLevel({ cfg: levelCfg(2), rng: seeded(1) });
+    lv.sim.player.hp = 3;
+    lv.sim.waveIndex = 99; lv.sim.enemies.length = 0;
+    stepLevel(lv, {}, 2);
+    eq(lv.sim.cleared, true);
+    const door = doorCenter(lv.sim.room);
+    eq(lv.sim.room.hits(door.x, door.y, 5), false, 'the door is open');
+    lv.sim.player.x = door.x; lv.sim.player.y = door.y;
+    eq(stepLevel(lv, {}, 1), 'room');
+    stepLevel(lv, {}, 60);
+    eq(lv.roomIndex, 1);
+    eq(lv.sim.player.hp, 3, 'health carried over');
+    eq(lv.sim.cleared, false, 'the new room is not cleared');
+    eq(lv.transition, 0);
+  });
+
+  test('ctr level: clearing the last room passes the level (once)', () => {
+    const lv = ClearTheRoom.createLevel({ cfg: levelCfg(1), rng: seeded(2) });
+    lv.sim.waveIndex = 99; lv.sim.enemies.length = 0;
+    let passed = 0; for (let i = 0; i < 120; i++) if (lv.update(STEP, idle) === 'passed') passed++;
+    eq(passed, 1);
+    eq(lv.update(STEP, idle), null);
+  });
+
+  test('ctr level: losing all health in any room reports lost', () => {
+    const lv = ClearTheRoom.createLevel({ cfg: levelCfg(2), rng: seeded(2) });
+    lv.sim.player.hp = 1;
+    const e = spawnNow(lv.sim, 'grunt', lv.sim.player.x + 4, lv.sim.player.y); e.speed = 0;
+    eq(stepLevel(lv, {}, 10), 'lost');
+  });
+
+  test('ctr level: a bot that fights and then walks to the door clears a whole level from several seeds', () => {
+    const route = (room, from, to) => {   // BFS over free tiles: returns the first step toward the goal tile
+      const T = 20, key = (i, j) => i + ',' + j, goal = key(to.i, to.j), prev = new Map(), queue = [[from.i, from.j]];
+      prev.set(key(from.i, from.j), null);
+      for (let q = 0; q < queue.length; q++) {
+        const [i, j] = queue[q];
+        if (key(i, j) === goal) break;
+        for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const ni = i + di, nj = j + dj;
+          if (room.solid[nj] && room.solid[nj][ni] === false && !prev.has(key(ni, nj))) { prev.set(key(ni, nj), [i, j]); queue.push([ni, nj]); }
+        }
+      }
+      const path = [];
+      for (let cur = [to.i, to.j]; cur; cur = prev.get(key(cur[0], cur[1]))) path.push(cur);
+      path.reverse();
+      const cur = path[1] || path[0];
+      return { x: cur[0] * T + T / 2, y: cur[1] * T + T / 2 };
+    };
+    for (let seed = 1; seed <= 4; seed++) {
+      const lv = ClearTheRoom.createLevel({ cfg: levelCfg(3), rng: seeded(seed) });
+      let ev = null, rooms = 1;
+      for (let i = 0; i < 60 * 240 && ev !== 'passed' && ev !== 'lost'; i++) {
+        const sim = lv.sim, p = sim.player, live = sim.enemies.filter(e => e.spawnT <= 0);
+        const near = live.slice().sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+        let mx = 0, my = 0;
+        if (sim.cleared) {
+          const door = sim.room.doors[0], step = route(sim.room, { i: Math.floor(p.x / 20), j: Math.floor(p.y / 20) }, door);
+          mx = step.x - p.x; my = step.y - p.y;
+        } else if (near) {
+          const dx = p.x - near.x, dy = p.y - near.y, d = Math.hypot(dx, dy) || 1;
+          if (d < 110) { mx = dx / d + (-dy / d) * 0.6; my = dy / d + (dx / d) * 0.6; }
+          if (Math.hypot(mx, my) > 0 && sim.room.hits(p.x + mx * 8, p.y + my * 8, 6)) { mx = 320 - p.x; my = 180 - p.y; }
+        }
+        ev = lv.update(STEP, { moveX: mx, moveY: my, aimX: near ? near.x : p.x + 1, aimY: near ? near.y : p.y, fire: !!near });
+        if (ev === 'room') rooms++;
+      }
+      eq(ev, 'passed', 'seed ' + seed);
+      eq(rooms, 3, 'rooms visited, seed ' + seed);
+    }
   });
 
   test('ctr: a bot that shoots the nearest enemy and keeps its distance clears level 1', () => {

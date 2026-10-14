@@ -90,8 +90,7 @@ function beginLevel() {
   const run = progression.run;
   if (chapterId === 'cleartheroom') {
     const cfg = ClearTheRoomData.levels[run.level - 1];
-    const layouts = ClearTheRoomData.layouts;
-    sim = ClearTheRoom.create({ layout: layouts[Math.floor(Math.random() * layouts.length)], waves: ClearTheRoom.buildWaves(cfg) });
+    sim = ClearTheRoom.createLevel({ cfg });
     roomHelp = 4;
   } else {
     sim = JumpGuy.create(JumpGuy.buildLevel(run.level));
@@ -194,6 +193,7 @@ function updateRoom() {
   sim.fx.length = 0;
   if (roomHelp > 0) roomHelp -= DT;
   updateParticles();
+  if (ev === 'room') { Sfx.select(); particles = []; return null; }
   return ev === 'lost' ? 'hit' : ev;
 }
 
@@ -366,7 +366,16 @@ function drawRoom() {
   const i0 = Math.floor(cam.x / T), i1 = Math.ceil((cam.x + W) / T), j0 = Math.floor(cam.y / T), j1 = Math.ceil((cam.y + H) / T);
   for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
     const x = Math.round(i * T - cam.x), y = Math.round(j * T - cam.y);
-    if (r.solid[j] && r.solid[j][i]) {
+    if (r.doors.some(d => d.i === i && d.j === j)) {
+      if (r.solid[j][i]) { // closed door
+        ctx.fillStyle = '#b13e53'; ctx.fillRect(x, y, T, T);
+        ctx.fillStyle = '#ef7d57'; ctx.fillRect(x + 2, y + 2, T - 4, T - 4);
+        ctx.fillStyle = '#b13e53'; ctx.fillRect(x + 8, y + 2, 4, T - 4);
+      } else {            // open door
+        ctx.fillStyle = '#0d0e17'; ctx.fillRect(x, y, T, T);
+        ctx.fillStyle = '#a7f070'; ctx.fillRect(x + 8, y + 8, 4, 4);
+      }
+    } else if (r.solid[j] && r.solid[j][i]) {
       ctx.fillStyle = '#566c86'; ctx.fillRect(x, y, T, T);
       ctx.fillStyle = '#94a3b8'; ctx.fillRect(x, y, T, 2);
       ctx.fillStyle = '#333c57'; ctx.fillRect(x, y + T - 3, T, 3);
@@ -393,6 +402,7 @@ function drawRoom() {
     ctx.fillStyle = '#fff';
     ctx.fillRect(Math.round(mouse.x) - 3, Math.round(mouse.y), 7, 1); ctx.fillRect(Math.round(mouse.x), Math.round(mouse.y) - 3, 1, 7);
   }
+  if (sim.fade > 0) { ctx.fillStyle = 'rgba(0,0,0,' + sim.fade + ')'; ctx.fillRect(0, 0, W, H); }
 }
 
 function drawLives() {
@@ -405,6 +415,7 @@ function drawLives() {
   if (chapterId === 'cleartheroom') {
     for (let i = 0; i < sim.player.maxHp; i++) pixels(HEART, { r: i < sim.player.hp ? '#ef4444' : '#333c57' }, 6 + i * 10, 5);
     text('LIVES ' + hud.lives, 6, 16, '#fff', 8);
+    text('ROOM ' + (sim.roomIndex + 1) + '/' + sim.roomCount, W / 2, 6, '#fff', 8, 'center');
     text('LEVEL ' + hud.level + '/' + CHAPTERS.find(c => c.id === chapterId).levels, W - 6, 6, '#fff', 8, 'right');
     return;
   }
@@ -491,7 +502,8 @@ function draw() {
   }
   if (scene === 'play') {
     if (chapterId === 'cleartheroom') {
-      if (roomHelp > 0) text('WASD MOVE   MOUSE AIM + HOLD CLICK TO SHOOT', W / 2, 160, '#fff', 8, 'center');
+      if (sim.sim.cleared) text('ROOM CLEARED - TAKE THE OPEN DOOR', W / 2, 160, '#a7f070', 8, 'center');
+      else if (roomHelp > 0) text('WASD MOVE   MOUSE AIM + HOLD CLICK TO SHOOT', W / 2, 160, '#fff', 8, 'center');
     } else {
       if (mode === 'chapter') drawProgressBar();
       if (sim.dist < 120) text('SPACE / UP / CLICK TO JUMP', W / 2, 30, '#fff', 8, 'center');

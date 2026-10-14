@@ -1,27 +1,35 @@
 // Clear the Room simulation: top-down room, WASD movement, mouse aim and shoot, enemies that chase.
-// No canvas, no DOM, no storage: a room is stepped with a fixed dt and reports only 'passed' or 'lost'.
+// No canvas, no DOM, no storage: a room is stepped with a fixed dt; a level (a chain of rooms) reports only
+// 'passed' or 'lost' (plus 'room' when the player walks into the next room).
 // Visual/audio cues (shots, hits, kills...) are queued in sim.fx for the shell to drain.
 const ClearTheRoom = {
   TILE: 20,
+  ROOM_TRANSITION: 0.5,   // s of fade between two rooms
   CLEAR_DELAY: 0.6,   // s between the last enemy dying and 'passed'
 
-  // Turns the character grid into { width, height, start, spawns, hits(cx, cy, half) }.
+  // Turns the character grid into { width, height, start, spawns, doors, solid, hits(cx, cy, half), ... }.
+  // Door tiles ('D') are walls until openDoors() is called.
   parseLayout(rows) {
     const T = ClearTheRoom.TILE;
-    const solid = rows.map(r => [...r].map(ch => ch === '#'));
-    const spawns = [];
+    const solid = rows.map(r => [...r].map(ch => ch === '#' || ch === 'D'));
+    const spawns = [], doors = [];
     let start = null;
     rows.forEach((r, j) => [...r].forEach((ch, i) => {
       const c = { x: i * T + T / 2, y: j * T + T / 2 };
       if (ch === 'S') spawns.push(c);
       if (ch === 'P') start = c;
+      if (ch === 'D') doors.push({ i, j });
     }));
     return {
       width: rows[0].length * T,
       height: rows.length * T,
       start,
       spawns,
+      doors,
       solid,
+      openDoors() { for (const d of doors) solid[d.j][d.i] = false; },
+      // True when the point is inside a door tile.
+      inDoor(x, y) { const i = Math.floor(x / T), j = Math.floor(y / T); return doors.some(d => d.i === i && d.j === j); },
       // True when the square centered on (cx, cy) with the given half side touches a wall (or leaves the room).
       hits(cx, cy, half) {
         const x0 = Math.floor((cx - half) / T), x1 = Math.floor((cx + half - 1e-6) / T);
@@ -51,23 +59,71 @@ const ClearTheRoom = {
     return waves;
   },
 
+  // A level: a chain of rooms, each picked at random (never the same layout twice in a row).
+  // Health carries over from room to room. Exposes the current room's room/player/enemies/bullets/fx.
+  // update returns 'passed', 'lost' or 'room' (just entered the next room); during the short transition it returns null.
+  createLevel({ cfg, rng }) {
+    rng = rng || Math.random;
+    const layouts = ClearTheRoomData.layouts, picks = [];
+    for (let r = 0; r < cfg.rooms; r++) {
+      let k;
+      do { k = Math.floor(rng() * layouts.length); } while (layouts.length > 1 && k === picks[r - 1]);
+      picks.push(k);
+    }
+    const waves = picks.map(() => ClearTheRoom.buildWaves(cfg, rng));
+    const make = (index, hp) => ClearTheRoom.create({ layout: layouts[picks[index]], waves: waves[index], final: index === cfg.rooms - 1, hp });
+    const T = ClearTheRoom.ROOM_TRANSITION;
+    const level = {
+      roomIndex: 0,
+      roomCount: cfg.rooms,
+      layoutIndexes: picks,   // which layout each room uses
+      sim: make(0),
+      transition: 0,   // s left of the change-of-room fade; the rooms are swapped halfway through
+      get fade() { return level.transition > 0 ? 1 - Math.abs(level.transition - T / 2) / (T / 2) : 0; },
+      get room() { return level.sim.room; },
+      get player() { return level.sim.player; },
+      get enemies() { return level.sim.enemies; },
+      get bullets() { return level.sim.bullets; },
+      get fx() { return level.sim.fx; },
+      update(dt, input) {
+        if (level.transition > 0) {
+          const before = level.transition;
+          level.transition = Math.max(0, level.transition - dt);
+          if (before > T / 2 && level.transition <= T / 2) {
+            level.roomIndex++;
+            level.sim = make(level.roomIndex, level.sim.player.hp);
+          }
+          return null;
+        }
+        const ev = level.sim.update(dt, input);
+        if (ev === 'exit') { level.transition = T; return 'room'; }
+        return ev;
+      },
+    };
+    return level;
+  },
+
   // layout: rows of characters; waves: result of buildWaves (spawn points are used in a fixed, distance-based order).
-  create({ layout, waves }) {
+  // final: the last room of a level (clearing it passes the level); otherwise clearing it opens the doors.
+  // hp: health carried over from the previous room.
+  create({ layout, waves, final = true, hp }) {
     const D = ClearTheRoomData, P = D.player;
     const room = ClearTheRoom.parseLayout(layout);
     const sim = {
       room,
-      player: { x: room.start.x, y: room.start.y, size: P.size, hp: P.maxHp, maxHp: P.maxHp, invuln: 0, fireCd: 0, dirX: 1, dirY: 0 },
+      player: { x: room.start.x, y: room.start.y, size: P.size, hp: hp === undefined ? P.maxHp : hp, maxHp: P.maxHp, invuln: 0, fireCd: 0, dirX: 1, dirY: 0 },
       enemies: [],
       bullets: [],
       fx: [],                 // { type: 'shoot' | 'hit' | 'kill' | 'hurt', x, y }
       state: 'running',       // running | lost | passed
+      cleared: false,         // every wave defeated; doors open (non-final rooms)
       waveIndex: 0,
       waveTimer: D.waveDelay,
       clearTimer: ClearTheRoom.CLEAR_DELAY,
       time: 0,
 
-      // input: { moveX, moveY (-1..1), aimX, aimY (room coordinates), fire }. Returns 'passed' or 'lost' once.
+      // input: { moveX, moveY (-1..1), aimX, aimY (room coordinates), fire }.
+      // Returns 'passed' (final room cleared), 'lost', or 'exit' (player walked through an open door).
       update(dt, input) {
         if (sim.state !== 'running') return null;
         sim.time += dt;
@@ -92,7 +148,10 @@ const ClearTheRoom = {
 
         sim.updateBullets(dt);
         if (sim.updateEnemies(dt)) { sim.state = 'lost'; return 'lost'; }
-        return sim.updateWaves(dt);
+        const ev = sim.updateWaves(dt);
+        if (ev) return ev;
+        if (sim.cleared && room.inDoor(p.x, p.y)) return 'exit';
+        return null;
       },
 
       // Moves an entity axis by axis so it slides along walls.
@@ -193,6 +252,10 @@ const ClearTheRoom = {
         if (sim.waveIndex < waves.length) {
           sim.waveTimer -= dt;
           if (sim.waveTimer <= 0) { sim.spawnWave(waves[sim.waveIndex++]); sim.waveTimer = D.waveDelay; }
+          return null;
+        }
+        if (!final) {
+          if (!sim.cleared) { sim.cleared = true; room.openDoors(); }
           return null;
         }
         sim.clearTimer -= dt;
