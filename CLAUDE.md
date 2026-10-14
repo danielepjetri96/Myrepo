@@ -33,3 +33,17 @@ To run either, open the HTML file in a browser (`shooter/index.html` works from 
 - `audio.js` — `Sfx`, synthesized sound effects (initialized lazily on first user input).
 
 Conventions: all drawing uses logical 320x180 coordinates; `resize()` scales the canvas (integer scale when possible, `VIEW_SCALE` includes devicePixelRatio) and `Game.draw()` sets the transform each frame. Player progression is the `Game.stats` object (seeded from `BASE_STATS`) mutated by entries in `UPGRADES`.
+
+## Agent skills
+
+### Issue tracker
+
+Le issue sono GitHub Issues di danielepjetri96/Myrepo, gestite con la CLI `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Vocabolario di default: needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: un `CONTEXT.md` e `docs/adr/` nella root. See `docs/agents/domain.md`.
