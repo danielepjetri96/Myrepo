@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>GtJ - test progressione</title>
+<style>
+  body { font: 14px/1.5 monospace; background: #111; color: #ddd; margin: 16px; }
+  .pass { color: #6c6; } .fail { color: #f66; }
+  h1 { font-size: 16px; }
+</style>
+</head>
+<body>
+<h1 id="summary">Esecuzione...</h1>
+<pre id="out"></pre>
+<script src="progression.js"></script>
+<script>
+// Tiny test runner: open this file in a browser, no server needed.
+const results = [];
+function test(name, fn) {
+  try { fn(); results.push({ name, ok: true }); }
+  catch (e) { results.push({ name, ok: false, err: e.message }); }
+}
+function eq(actual, expected, label) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error((label ? label + ': ' : '') + 'expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(actual));
+  }
+}
+
+// Fake storage standing in for localStorage.
+function fakeStorage(initial) {
+  const data = Object.assign({}, initial);
+  return {
+    data,
+    getItem(k) { return k in data ? data[k] : null; },
+    setItem(k, v) { data[k] = String(v); },
+    removeItem(k) { delete data[k]; },
+  };
+}
+
+// Independent fixture: 3 chapters, deliberately not the real game data.
+const CHAPTERS = [
+  { id: 'a', levels: 3 },
+  { id: 'b', levels: 2 },
+  { id: 'c', levels: 2 },
+];
+function fresh(storage) { return Progression.create({ storage: storage || fakeStorage(), chapters: CHAPTERS }); }
+
+// ---- tests ----
+test('at the start only the first chapter is unlocked', () => {
+  const p = fresh();
+  eq(p.isChapterUnlocked('a'), true, 'a');
+  eq(p.isChapterUnlocked('b'), false, 'b');
+  eq(p.isChapterUnlocked('c'), false, 'c');
+});
+
+test('starting a chapter gives level 1 and 3 lives', () => {
+  const p = fresh();
+  eq(p.startChapter('a'), true);
+  eq(p.run, { chapter: 'a', level: 1, lives: 3 });
+});
+
+test('a locked chapter cannot be started', () => {
+  const p = fresh();
+  eq(p.startChapter('b'), false);
+  eq(p.run, null);
+});
+
+test('passing a level moves to the next one', () => {
+  const p = fresh();
+  p.startChapter('a');
+  eq(p.levelPassed(), { chapterCompleted: false });
+  eq(p.run, { chapter: 'a', level: 2, lives: 3 });
+});
+
+test('losing a life keeps the level and lives are not refilled by the next level', () => {
+  const p = fresh();
+  p.startChapter('a');
+  eq(p.lifeLost(), { gameOver: false });
+  eq(p.run, { chapter: 'a', level: 1, lives: 2 });
+  p.levelPassed();
+  eq(p.run, { chapter: 'a', level: 2, lives: 2 });
+});
+
+test('losing the last life restarts the chapter from level 1 with 3 lives', () => {
+  const p = fresh();
+  p.startChapter('a');
+  p.levelPassed();
+  p.lifeLost();
+  p.lifeLost();
+  eq(p.lifeLost(), { gameOver: true });
+  eq(p.run, { chapter: 'a', level: 1, lives: 3 });
+});
+
+function complete(p, id, levels) {
+  p.startChapter(id);
+  let r;
+  for (let i = 0; i < levels; i++) r = p.levelPassed();
+  return r;
+}
+
+test('endless is locked until its chapter is completed', () => {
+  const p = fresh();
+  eq(p.isEndlessUnlocked('a'), false);
+  p.startChapter('a');
+  p.levelPassed();
+  eq(p.isEndlessUnlocked('a'), false);
+});
+
+test('completing a chapter unlocks the next chapter and its own endless only', () => {
+  const p = fresh();
+  eq(complete(p, 'a', 3), { chapterCompleted: true });
+  eq(p.run, null);
+  eq(p.isChapterCompleted('a'), true);
+  eq(p.isChapterUnlocked('b'), true);
+  eq(p.isChapterUnlocked('c'), false);
+  eq(p.isEndlessUnlocked('a'), true);
+  eq(p.isEndlessUnlocked('b'), false);
+});
+
+test('unlocks survive a game over in a later chapter', () => {
+  const p = fresh();
+  complete(p, 'a', 3);
+  p.startChapter('b');
+  p.lifeLost(); p.lifeLost(); p.lifeLost();
+  eq(p.isChapterCompleted('a'), true);
+  eq(p.isChapterUnlocked('b'), true);
+  eq(p.isEndlessUnlocked('a'), true);
+});
+
+test('a completed chapter can be replayed from level 1 without losing unlocks', () => {
+  const p = fresh();
+  complete(p, 'a', 3);
+  eq(p.startChapter('a'), true);
+  eq(p.run, { chapter: 'a', level: 1, lives: 3 });
+  p.lifeLost(); p.lifeLost(); p.lifeLost();
+  eq(p.isChapterUnlocked('b'), true);
+  eq(p.isEndlessUnlocked('a'), true);
+});
+
+test('endless record starts at 0 and updates only when beaten', () => {
+  const p = fresh();
+  complete(p, 'a', 3);
+  eq(p.record('a'), 0);
+  eq(p.submitEndless('a', 120), true);
+  eq(p.record('a'), 120);
+  eq(p.submitEndless('a', 80), false);
+  eq(p.submitEndless('a', 120), false);
+  eq(p.record('a'), 120);
+  eq(p.submitEndless('a', 121), true);
+  eq(p.record('a'), 121);
+});
+
+test('records are kept per chapter', () => {
+  const p = fresh();
+  complete(p, 'a', 3);
+  complete(p, 'b', 2);
+  p.submitEndless('a', 10);
+  p.submitEndless('b', 99);
+  eq([p.record('a'), p.record('b'), p.record('c')], [10, 99, 0]);
+});
+
+test('an endless score is ignored while that endless is locked', () => {
+  const p = fresh();
+  eq(p.submitEndless('a', 50), false);
+  eq(p.record('a'), 0);
+});
+
+test('a reloaded game resumes at the saved level and lives', () => {
+  const s = fakeStorage();
+  const p = fresh(s);
+  complete(p, 'a', 3);
+  p.submitEndless('a', 42);
+  p.startChapter('b');
+  p.lifeLost();
+  const q = fresh(s);
+  eq(q.run, { chapter: 'b', level: 1, lives: 2 });
+  eq(q.isChapterCompleted('a'), true);
+  eq(q.isChapterUnlocked('b'), true);
+  eq(q.record('a'), 42);
+});
+
+test('a reloaded game remembers a level passed mid-chapter', () => {
+  const s = fakeStorage();
+  const p = fresh(s);
+  p.startChapter('a');
+  p.levelPassed();
+  eq(fresh(s).run, { chapter: 'a', level: 2, lives: 3 });
+});
+
+test('a game over is saved as a fresh attempt at level 1', () => {
+  const s = fakeStorage();
+  const p = fresh(s);
+  p.startChapter('a');
+  p.levelPassed();
+  p.lifeLost(); p.lifeLost(); p.lifeLost();
+  eq(fresh(s).run, { chapter: 'a', level: 1, lives: 3 });
+});
+
+test('reset returns to the initial state, also after reload', () => {
+  const s = fakeStorage();
+  const p = fresh(s);
+  complete(p, 'a', 3);
+  p.submitEndless('a', 42);
+  p.startChapter('b');
+  p.reset();
+  for (const g of [p, fresh(s)]) {
+    eq(g.run, null);
+    eq(g.isChapterUnlocked('a'), true);
+    eq(g.isChapterUnlocked('b'), false);
+    eq(g.isChapterCompleted('a'), false);
+    eq(g.record('a'), 0);
+  }
+});
+
+test('missing or corrupted saves give a valid initial state', () => {
+  const bad = [
+    'not json at all',
+    '{"v":1,',
+    'null',
+    '42',
+    '"text"',
+    '{"v":1,"completed":"a","records":[],"run":7}',
+  ];
+  for (const raw of bad) {
+    const p = fresh(fakeStorage({ [Progression.KEY]: raw }));
+    eq(p.run, null, raw);
+    eq(p.isChapterUnlocked('a'), true, raw);
+    eq(p.isChapterUnlocked('b'), false, raw);
+    eq(p.record('a'), 0, raw);
+  }
+});
+
+test('nonsense values inside a readable save are discarded', () => {
+  const save = {
+    v: 1,
+    completed: ['zzz', 'b'],            // unknown chapter, and b without a completed
+    records: { a: -5, b: 'x', zzz: 9 },
+    run: { chapter: 'c', level: 1, lives: 3 }, // c is locked
+  };
+  const p = fresh(fakeStorage({ [Progression.KEY]: JSON.stringify(save) }));
+  eq(p.run, null);
+  eq(p.isChapterUnlocked('c'), false);
+  eq([p.record('a'), p.record('b')], [0, 0]);
+});
+
+test('a saved run with out-of-range level or lives is discarded', () => {
+  for (const run of [
+    { chapter: 'a', level: 99, lives: 3 },
+    { chapter: 'a', level: 0, lives: 3 },
+    { chapter: 'a', level: 1, lives: 0 },
+    { chapter: 'a', level: 1, lives: 9 },
+    { chapter: 'a', level: 1.5, lives: 3 },
+  ]) {
+    const raw = JSON.stringify({ v: 1, completed: [], records: {}, run });
+    eq(fresh(fakeStorage({ [Progression.KEY]: raw })).run, null, JSON.stringify(run));
+  }
+});
+
+test('the game still works when storage is unavailable', () => {
+  const broken = {
+    getItem() { throw new Error('denied'); },
+    setItem() { throw new Error('denied'); },
+    removeItem() { throw new Error('denied'); },
+  };
+  const p = fresh(broken);
+  eq(p.startChapter('a'), true);
+  p.levelPassed();
+  eq(p.run, { chapter: 'a', level: 2, lives: 3 });
+  p.reset();
+  eq(p.run, null);
+});
+
+// ---- report ----
+const failed = results.filter(r => !r.ok).length;
+document.getElementById('summary').textContent = failed ? 'FAIL ' + failed + ' / ' + results.length : 'PASS ' + results.length + ' / ' + results.length;
+document.getElementById('summary').className = failed ? 'fail' : 'pass';
+document.getElementById('out').textContent = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '\n       ' + r.err)).join('\n');
+</script>
+</body>
+</html>
