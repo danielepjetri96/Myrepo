@@ -437,9 +437,18 @@ test('endless: standing still ends the run on the first obstacle', () => {
 test('endless: harder patterns only appear after their distance', () => {
   const def = JumpGuy.buildEndless(seeded(6)), E = JumpGuyData.endless;
   def.extend(E.tierAt[0] - 600);
-  const maxEarly = Math.max(...def.obstacles.map(o => o.h));
-  const tier1 = Math.max(...JumpGuyData.patterns.filter(p => p.tier === 1).flatMap(p => p.o.map(o => o[2])));
-  eq(maxEarly <= tier1, true);
+  const tier1 = JumpGuyData.patterns.filter(p => p.tier === 1).map(p => JSON.stringify(p.o));
+  for (const g of def.groups) {
+    const sig = JSON.stringify(def.obstacles.filter(o => o.x >= g.x && o.x < g.x + g.span).map(o => [o.x - g.x, o.w, o.h]));
+    eq(tier1.includes(sig), true, 'group at ' + g.x);
+  }
+});
+
+test('obstacles and groups are generated in ascending x', () => {
+  for (const def of [JumpGuy.buildLevel(5, seeded(2)), JumpGuy.buildEndless(seeded(2))]) {
+    def.extend && def.extend(6000);
+    for (const list of [def.obstacles, def.groups]) for (let i = 1; i < list.length; i++) eq(list[i].x >= list[i - 1].x, true);
+  }
 });
 
 // ---- report ----

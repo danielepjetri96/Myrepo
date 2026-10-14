@@ -15,6 +15,14 @@ const JumpGuy = {
   LEAD_IN: 300,     // px of empty course before the first pattern
   LEAD_OUT: 200,    // px of empty course before the finish
 
+  // Puts pattern p at x (obstacles and group are appended in ascending x, which pruning relies on). Returns its span.
+  placePattern(p, x, obstacles, groups) {
+    const span = Math.max(...p.o.map(([dx, w]) => dx + w));
+    for (const [dx, w, h] of p.o) obstacles.push({ x: x + dx, w, h });
+    groups.push({ x, span });
+    return span;
+  },
+
   // Builds a level from JumpGuyData: patterns in random order, spaced so that each one can be jumped separately.
   // Returns { length, speed, obstacles, groups: [{ x, span }] }.
   buildLevel(n, rng) {
@@ -27,8 +35,7 @@ const JumpGuy = {
       const p = pool[Math.floor(rng() * pool.length)];
       const span = Math.max(...p.o.map(([dx, w]) => dx + w));
       if (x + span > cfg.length - J.LEAD_OUT) break;
-      for (const [dx, w, h] of p.o) obstacles.push({ x: x + dx, w, h });
-      groups.push({ x, span });
+      J.placePattern(p, x, obstacles, groups);
       x += span + Math.round(cfg.speed * J.MIN_GAP + cfg.gapExtra[0] + rng() * (cfg.gapExtra[1] - cfg.gapExtra[0]));
     }
     return { length: cfg.length, speed: cfg.speed, obstacles, groups };
@@ -54,11 +61,9 @@ const JumpGuy = {
         const tier = 1 + E.tierAt.filter(d => x >= d).length;
         const pool = JumpGuyData.patterns.filter(p => p.tier <= tier);
         const p = pool[Math.floor(rng() * pool.length)];
-        const span = Math.max(...p.o.map(([dx, w]) => dx + w));
-        for (const [dx, w, h] of p.o) def.obstacles.push({ x: x + dx, w, h });
-        def.groups.push({ x, span });
+        const span = J.placePattern(p, x, def.obstacles, def.groups);
         const t = ramp(x), lo = lerp(E.gapExtraStart[0], E.gapExtraEnd[0], t), hi = lerp(E.gapExtraStart[1], E.gapExtraEnd[1], t);
-        x += span + Math.round(def.speedAt(x) * J.MIN_GAP + lo + rng() * (hi - lo));
+        x += span + Math.round(def.speedAt(x + span) * J.MIN_GAP + lo + rng() * (hi - lo));
       }
       while (def.obstacles.length && def.obstacles[0].x + def.obstacles[0].w < dist - 100) def.obstacles.shift();
       while (def.groups.length && def.groups[0].x + def.groups[0].span < dist - 100) def.groups.shift();

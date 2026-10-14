@@ -65,6 +65,7 @@ let endlessResult = null;           // { score, record, newRecord } after an end
 let sim = null, deathTimer = 0, sceneTime = 0, shake = 0, gameOver = false;
 
 function startJumpGuy() {
+  endlessResult = null;
   let run = progression.run;
   if (!(run && run.chapter === 'jumpguy' && JumpGuyData.levels[run.level - 1])) { progression.startChapter('jumpguy'); run = progression.run; }
   if (run) { mode = 'chapter'; beginLevel(); }
@@ -87,7 +88,7 @@ function toMenu() { scene = 'menu'; sceneTime = 0; }
 // Menu rows: the three chapters, with Jump Guy's Endless right after Jump Guy.
 const MENU = [
   { kind: 'chapter', i: 0 },
-  { kind: 'endless', id: 'jumpguy', name: 'JUMP GUY ENDLESS' },
+  { kind: 'endless', id: 'jumpguy', name: 'JUMP GUY ENDLESS', indent: 12 },
   { kind: 'chapter', i: 1 },
   { kind: 'chapter', i: 2 },
 ];
@@ -269,13 +270,13 @@ function panel(title, lines, color) {
 function drawMenu() {
   drawBackground(sceneTime * 40); drawGround(sceneTime * 40);
   text('GtJ', W / 2, 8, '#ffcd75', 26, 'center');
-  text('SELECT A CHAPTER', W / 2, 36, '#fff', 8, 'center');
+  text('CHOOSE WHAT TO PLAY', W / 2, 36, '#fff', 8, 'center');
   MENU.forEach((item, i) => {
     const r = CARD(i);
     let title, sub, unlocked;
     if (item.kind === 'endless') {
       unlocked = progression.isEndlessUnlocked(item.id);
-      title = '   ' + item.name;
+      title = item.name;
       sub = unlocked ? 'BEST: ' + progression.record(item.id) + ' M' : 'LOCKED - COMPLETE JUMP GUY';
     } else {
       const c = CHAPTERS[item.i];
@@ -289,8 +290,9 @@ function drawMenu() {
     }
     ctx.fillStyle = i === menuIndex && unlocked ? '#ffcd75' : '#1a1c2c'; ctx.fillRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
     ctx.fillStyle = unlocked ? '#3b5dc9' : '#333c57'; ctx.fillRect(r.x, r.y, r.w, r.h);
-    text(title, r.x + 8, r.y + 3, unlocked ? '#fff' : '#94a3b8', 8);
-    text(sub, r.x + 8, r.y + 13, unlocked ? '#a7f070' : '#94a3b8', 8);
+    const ix = item.indent || 0;
+    text(title, r.x + 8 + ix, r.y + 3, unlocked ? '#fff' : '#94a3b8', 8);
+    text(sub, r.x + 8 + ix, r.y + 13, unlocked ? '#a7f070' : '#94a3b8', 8);
   });
   text('UP/DOWN + ENTER, OR CLICK', W / 2, 166, '#cbd5e1', 8, 'center');
 }
