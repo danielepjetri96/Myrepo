@@ -13,6 +13,7 @@
 <h1 id="summary">Esecuzione...</h1>
 <pre id="out"></pre>
 <script src="progression.js"></script>
+<script src="settings.js"></script>
 <script src="jumpguy-data.js"></script>
 <script src="jumpguy.js"></script>
 <script>
@@ -449,6 +450,43 @@ test('obstacles and groups are generated in ascending x', () => {
     def.extend && def.extend(6000);
     for (const list of [def.obstacles, def.groups]) for (let i = 1; i < list.length; i++) eq(list[i].x >= list[i - 1].x, true);
   }
+});
+
+test('settings: sound is on by default, toggling is remembered after reload', () => {
+  const st = fakeStorage();
+  const s = Settings.create({ storage: st });
+  eq(s.muted, false);
+  eq(s.toggleMuted(), true);
+  eq(Settings.create({ storage: st }).muted, true, 'after reload');
+  eq(s.toggleMuted(), false);
+  eq(Settings.create({ storage: st }).muted, false, 'unmuted after reload');
+});
+
+test('settings: corrupted or unavailable storage gives defaults and still works', () => {
+  eq(Settings.create({ storage: fakeStorage({ 'gtj.settings.v1': '{oops' }) }).muted, false);
+  eq(Settings.create({ storage: fakeStorage({ 'gtj.settings.v1': '{"muted":"yes"}' }) }).muted, false);
+  const broken = { getItem() { throw new Error('no'); }, setItem() { throw new Error('no'); } };
+  const s = Settings.create({ storage: broken });
+  eq(s.toggleMuted(), true);
+});
+
+test('settings are kept apart from progress: resetting progress keeps the sound choice', () => {
+  const st = fakeStorage();
+  Settings.create({ storage: st }).toggleMuted();
+  const p = Progression.create({ storage: st, chapters: CHAPTERS });
+  complete(p, 'a', 3);
+  p.reset();
+  eq(Settings.create({ storage: st }).muted, true);
+});
+
+test('replaying a completed chapter restarts at level 1 and keeps the unlocks and the record', () => {
+  const p = fresh();
+  complete(p, 'a', 3);
+  p.submitEndless('a', 40);
+  eq(p.startChapter('a'), true);
+  eq(p.run, { chapter: 'a', level: 1, lives: 3 });
+  eq(p.isChapterUnlocked('b'), true);
+  eq(p.record('a'), 40);
 });
 
 // ---- report ----

@@ -13,9 +13,10 @@ const PLAYABLE = { jumpguy: true };
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const NO_STORAGE = { getItem: () => null, setItem() {}, removeItem() {} };
-let progression;
-try { progression = Progression.create({ storage: window.localStorage, chapters: CHAPTERS }); }
-catch (e) { progression = Progression.create({ storage: NO_STORAGE, chapters: CHAPTERS }); }
+let storage;
+try { storage = window.localStorage; } catch (e) { storage = NO_STORAGE; }
+const progression = Progression.create({ storage, chapters: CHAPTERS });
+const settings = Settings.create({ storage });
 
 // ---- sound (synthesized, created on first input) ----
 const Sfx = {
@@ -25,7 +26,7 @@ const Sfx = {
     if (this.ac && this.ac.state === 'suspended') this.ac.resume();
   },
   tone(f0, f1, dur, type, vol, delay) {
-    if (!this.ac) return;
+    if (!this.ac || settings.muted) return;
     const t = this.ac.currentTime + (delay || 0), o = this.ac.createOscillator(), g = this.ac.createGain();
     o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
     g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
@@ -56,7 +57,7 @@ const wasPressed = (...codes) => codes.some(c => pressedKeys.has(c));
 const JUMP_KEYS = ['Space', 'ArrowUp', 'KeyW'];
 
 // ---- state ----
-let scene = 'menu';           // menu | play | dying | cleared | over
+let scene = 'menu';           // menu | play | pause | confirm | dying | cleared | over
 let menuIndex = 0;
 let hud = { lives: 0, level: 1 };   // what the HUD shows, kept apart from Progression (which resets on game over)
 let clearedChapter = false;
@@ -107,7 +108,22 @@ function activateItem(i) {
   startJumpGuy();
 }
 
+// Clickable buttons: rectangles shared by update (hit-testing) and draw.
+const BTN = {
+  sound: { x: 40, y: 164, w: 112, h: 12 },
+  reset: { x: 168, y: 164, w: 112, h: 12 },
+  resume: { x: 90, y: 84, w: 140, h: 16 },
+  pauseSound: { x: 90, y: 106, w: 140, h: 16 },
+  quit: { x: 90, y: 128, w: 140, h: 16 },
+  yes: { x: 60, y: 132, w: 90, h: 16 },
+  no: { x: 170, y: 132, w: 90, h: 16 },
+};
+const hit = r => click && inRect(click, r);
+const soundLabel = () => 'M  SOUND: ' + (settings.muted ? 'OFF' : 'ON');
+
 function updateMenu() {
+  if (hit(BTN.sound)) { settings.toggleMuted(); Sfx.select(); return; }
+  if (hit(BTN.reset) || wasPressed('KeyR')) { Sfx.select(); scene = 'confirm'; sceneTime = 0; return; }
   const n = MENU.length;
   if (wasPressed('ArrowDown', 'KeyS')) menuIndex = (menuIndex + 1) % n;
   if (wasPressed('ArrowUp', 'KeyW')) menuIndex = (menuIndex + n - 1) % n;
@@ -120,10 +136,11 @@ function updateMenu() {
 const DT = 1 / 60;
 function update() {
   sceneTime += DT;
+  if (wasPressed('KeyM')) { settings.toggleMuted(); Sfx.select(); }
   if (shake > 0) shake = Math.max(0, shake - DT);
   if (scene === 'menu') updateMenu();
   else if (scene === 'play') {
-    if (wasPressed('Escape')) toMenu();
+    if (wasPressed('Escape', 'KeyP')) { scene = 'pause'; sceneTime = 0; }
     else {
       const pressed = wasPressed(...JUMP_KEYS) || !!click;
       const wasGrounded = sim.grounded;
@@ -145,6 +162,13 @@ function update() {
         Sfx.win(); const passed = progression.levelPassed(); clearedChapter = !!(passed && passed.chapterCompleted); scene = 'cleared'; sceneTime = 0;
       }
     }
+  } else if (scene === 'pause') {
+    if (hit(BTN.pauseSound)) { settings.toggleMuted(); Sfx.select(); }
+    if (wasPressed('Escape', 'KeyP', 'Enter') || hit(BTN.resume)) { scene = 'play'; sceneTime = 0; }
+    else if (wasPressed('KeyQ') || hit(BTN.quit)) toMenu();
+  } else if (scene === 'confirm') {
+    if (wasPressed('KeyY') || hit(BTN.yes)) { progression.reset(); menuIndex = 0; endlessResult = null; Sfx.select(); toMenu(); }
+    else if (wasPressed('KeyN', 'Escape') || hit(BTN.no)) toMenu();
   } else if (scene === 'dying') {
     deathTimer -= DT;
     if (deathTimer <= 0) {
@@ -267,6 +291,12 @@ function panel(title, lines, color) {
   lines.forEach((l, i) => text(l, W / 2, 96 + i * 14, '#fff', 8, 'center'));
 }
 
+function button(r, label, color) {
+  ctx.fillStyle = '#1a1c2c'; ctx.fillRect(r.x - 1, r.y - 1, r.w + 2, r.h + 2);
+  ctx.fillStyle = color || '#333c57'; ctx.fillRect(r.x, r.y, r.w, r.h);
+  text(label, r.x + r.w / 2, r.y + (r.h - 8) / 2 + 1, '#fff', 8, 'center');
+}
+
 function drawMenu() {
   drawBackground(sceneTime * 40); drawGround(sceneTime * 40);
   text('GtJ', W / 2, 8, '#ffcd75', 26, 'center');
@@ -294,7 +324,8 @@ function drawMenu() {
     text(title, r.x + 8 + ix, r.y + 3, unlocked ? '#fff' : '#94a3b8', 8);
     text(sub, r.x + 8 + ix, r.y + 13, unlocked ? '#a7f070' : '#94a3b8', 8);
   });
-  text('UP/DOWN + ENTER, OR CLICK', W / 2, 166, '#cbd5e1', 8, 'center');
+  button(BTN.sound, soundLabel());
+  button(BTN.reset, 'R  RESET PROGRESS');
 }
 
 function draw() {
@@ -302,11 +333,22 @@ function draw() {
   ctx.imageSmoothingEnabled = false;
   ctx.save();
   if (shake > 0) ctx.translate(Math.round((Math.random() - 0.5) * 6), Math.round((Math.random() - 0.5) * 6));
-  if (scene === 'menu') drawMenu();
+  if (scene === 'menu' || scene === 'confirm') drawMenu();
   else drawLevel();
   ctx.restore();
+  if (scene === 'confirm') {
+    ctx.fillStyle = '#0d0e17'; ctx.fillRect(0, 0, W, H);
+    panel('RESET PROGRESS?', ['ALL UNLOCKS, RECORDS AND SAVED LEVELS', 'WILL BE ERASED. SOUND SETTING IS KEPT.'], '#ef4444');
+    button(BTN.yes, 'Y  YES, RESET', '#b13e53'); button(BTN.no, 'N  CANCEL');
+    return;
+  }
   if (scene === 'menu') return;
   drawLives();
+  if (scene === 'pause') {
+    panel('PAUSED', [], '#ffcd75');
+    button(BTN.resume, 'P  RESUME', '#3b5dc9'); button(BTN.pauseSound, soundLabel()); button(BTN.quit, 'Q  QUIT TO MENU');
+    return;
+  }
   if (scene === 'play') {
     if (mode === 'chapter') drawProgressBar();
     if (sim.dist < 120) text('SPACE / UP / CLICK TO JUMP', W / 2, 30, '#fff', 8, 'center');
