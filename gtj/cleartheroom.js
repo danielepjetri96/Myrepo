@@ -51,8 +51,8 @@ const ClearTheRoom = {
       for (const id of ids) { r -= cfg.types[id]; if (r < 0) return id; }
       return ids[ids.length - 1];
     };
-    const waves = [];
-    for (let w = 0; w < cfg.waves; w++) {
+    const waves = [], count = Array.isArray(cfg.waves) ? cfg.waves[0] + Math.floor(rng() * (cfg.waves[1] - cfg.waves[0] + 1)) : cfg.waves;
+    for (let w = 0; w < count; w++) {
       const n = cfg.perWave[0] + Math.floor(rng() * (cfg.perWave[1] - cfg.perWave[0] + 1));
       waves.push(Array.from({ length: n }, pick));
     }
@@ -71,7 +71,7 @@ const ClearTheRoom = {
       picks.push(k);
     }
     const waves = picks.map(() => ClearTheRoom.buildWaves(cfg, rng));
-    const make = (index, carry) => ClearTheRoom.create({ layout: layouts[picks[index]], waves: waves[index], final: index === cfg.rooms - 1, carry });
+    const make = (index, carry) => ClearTheRoom.create({ layout: layouts[picks[index]], waves: waves[index], final: index === cfg.rooms - 1, carry, rng });
     const T = ClearTheRoom.ROOM_TRANSITION;
     const level = {
       roomIndex: 0,
@@ -107,13 +107,15 @@ const ClearTheRoom = {
   // layout: rows of characters; waves: result of buildWaves (spawn points are used in a fixed, distance-based order).
   // final: the last room of a level (clearing it passes the level); otherwise clearing it opens the doors.
   // carry: the player of the previous room; its health and invulnerability time carry over.
-  create({ layout, waves, final = true, carry }) {
+  create({ layout, waves, final = true, carry, rng }) {
     const D = ClearTheRoomData, P = D.player;
+    rng = rng || Math.random;
     const room = ClearTheRoom.parseLayout(layout);
     const sim = {
       room,
       player: { x: room.start.x, y: room.start.y, size: P.size, hp: carry ? carry.hp : P.maxHp, maxHp: P.maxHp, invuln: carry ? carry.invuln : 0, fireCd: 0, dirX: 1, dirY: 0 },
       enemies: [],
+      pickups: [],            // hearts left by dead enemies: { x, y }
       bullets: [],
       fx: [],                 // { type: 'shoot' | 'hit' | 'kill' | 'hurt', x, y }
       state: 'running',       // running | lost | passed
@@ -149,6 +151,7 @@ const ClearTheRoom = {
 
         sim.updateBullets(dt);
         if (sim.updateEnemies(dt)) { sim.state = 'lost'; return 'lost'; }
+        sim.updatePickups();
         const ev = sim.updateWaves(dt);
         if (ev) return ev;
         if (sim.cleared && room.inDoor(p.x, p.y)) return 'exit';
@@ -177,7 +180,35 @@ const ClearTheRoom = {
           }
         }
         sim.bullets = sim.bullets.filter(b => !b.dead);
+        const killed = sim.enemies.filter(e => e.hp <= 0);
         sim.enemies = sim.enemies.filter(e => e.hp > 0);
+        for (const e of killed) sim.onKill(e);
+      },
+
+      // Enemies that split spawn their children; some enemies leave a heart.
+      onKill(e) {
+        const def = D.enemies[e.type];
+        if (def.splits) {
+          for (let k = 0; k < def.splits.count; k++) {
+            const a = (k / def.splits.count) * Math.PI * 2, child = sim.makeEnemy(def.splits.type, e.x + Math.cos(a) * 6, e.y + Math.sin(a) * 6, 0);
+            if (!room.hits(child.x, child.y, child.size / 2)) sim.enemies.push(child); else sim.enemies.push(sim.makeEnemy(def.splits.type, e.x, e.y, 0));
+          }
+        }
+        if (def.dropChance > 0 && rng() < def.dropChance) sim.pickups.push({ x: e.x, y: e.y });
+      },
+
+      makeEnemy(id, x, y, spawnT) {
+        const def = D.enemies[id];
+        return { type: id, x, y, size: def.size, hp: def.hp, speed: def.speed, damage: def.damage, spawnT, flash: 0 };
+      },
+
+      // Hearts are picked up by touching them, but only when there is health to restore.
+      updatePickups() {
+        const p = sim.player;
+        sim.pickups = sim.pickups.filter(h => {
+          if (p.hp < p.maxHp && Math.hypot(p.x - h.x, p.y - h.y) < 10) { p.hp++; sim.fx.push({ type: 'heal', x: h.x, y: h.y }); return false; }
+          return true;
+        });
       },
 
       // Returns true when the player's health reaches zero.
@@ -269,8 +300,8 @@ const ClearTheRoom = {
         const p = sim.player;
         const points = room.spawns.slice().sort((a, b) => Math.hypot(b.x - p.x, b.y - p.y) - Math.hypot(a.x - p.x, a.y - p.y));
         types.forEach((id, i) => {
-          const def = D.enemies[id], pt = points[i % points.length];
-          sim.enemies.push({ type: id, x: pt.x, y: pt.y, size: def.size, hp: def.hp, speed: def.speed, damage: def.damage, spawnT: D.spawnWarning, flash: 0 });
+          const pt = points[i % points.length];
+          sim.enemies.push(sim.makeEnemy(id, pt.x, pt.y, D.spawnWarning));
         });
       },
     };

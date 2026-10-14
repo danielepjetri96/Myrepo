@@ -12,15 +12,25 @@ const ClearTheRoomData = {
     invuln: 1,          // s of invulnerability after being hit
   },
 
-  // All enemies chase the player in a straight line. dropChance: probability of leaving a heart.
+  // All enemies chase the player (walking around walls when needed); they differ in speed, health and damage.
+  // dropChance: probability of leaving a heart (worth 1 health) when killed.
+  // splits: on death it turns into `count` enemies of another type.
   enemies: {
-    grunt: { hp: 3, speed: 40, damage: 1, size: 12, dropChance: 0 },
+    grunt:      { hp: 3, speed: 40, damage: 1, size: 12, dropChance: 0 },
+    runner:     { hp: 1, speed: 75, damage: 1, size: 10, dropChance: 0 },                      // fast and fragile
+    brute:      { hp: 8, speed: 25, damage: 2, size: 18, dropChance: 0.15 },                   // slow and tough
+    splitter:   { hp: 2, speed: 35, damage: 1, size: 12, dropChance: 0.15, splits: { type: 'minirunner', count: 2 } },
+    minirunner: { hp: 1, speed: 70, damage: 1, size: 8, dropChance: 0 },                       // only comes from a splitter
   },
 
-  // One entry per level. rooms: rooms in the chain; waves: waves per room; perWave: [min, max] enemies per wave;
-  // types: spawn weights by enemy type. (Level 1 only for now: more levels and types come with later tickets.)
+  // One entry per level, easiest first. rooms: rooms in the chain; waves: waves per room (a number or [min, max]);
+  // perWave: [min, max] enemies per wave; types: spawn weights by enemy type.
   levels: [
-    { rooms: 3, waves: 2, perWave: [3, 4], types: { grunt: 1 } },
+    { rooms: 3, waves: 2,      perWave: [3, 4], types: { grunt: 1 } },
+    { rooms: 4, waves: 2,      perWave: [4, 5], types: { grunt: 3, runner: 2 } },
+    { rooms: 4, waves: [2, 3], perWave: [4, 6], types: { grunt: 3, runner: 2, brute: 1 } },
+    { rooms: 5, waves: 3,      perWave: [5, 7], types: { grunt: 3, runner: 2, brute: 1, splitter: 2 } },
+    { rooms: 6, waves: 3,      perWave: [6, 8], types: { grunt: 3, runner: 3, brute: 2, splitter: 2 } },
   ],
 
   waveDelay: 1,         // s between a cleared wave and the next one
@@ -146,6 +156,66 @@ const ClearTheRoomData = {
       "#..............#...............#",
       "#..............................#",
       "#........#...........#.........#",
+      "#..............S...............#",
+      "#S............................S#",
+      "################################",
+    ],
+    [ // bunkers
+      "################################",
+      "#S............................S#",
+      "#..............S...............#",
+      "#...#####.............#####....#",
+      "#...#####.............#####....#",
+      "#...#####......P......#####....#",
+      "#..............................#",
+      "#..............................#",
+      "D..............##............S.#",
+      "D..............##..............#",
+      "#..............................#",
+      "#..............................#",
+      "#...#####.............#####....#",
+      "#...#####.............#####....#",
+      "#...#####.............#####....#",
+      "#..............S...............#",
+      "#S............................S#",
+      "################################",
+    ],
+    [ // zigzag
+      "###############DD###############",
+      "#S............................S#",
+      "#..............................#",
+      "#..............................#",
+      "#..............................#",
+      "#####################..........#",
+      "#..............................#",
+      "#..............................#",
+      "#.S.............P............S.#",
+      "#..............................#",
+      "#..............................#",
+      "#..............................#",
+      "#..........#####################",
+      "#..............................#",
+      "#..............................#",
+      "#..............S...............#",
+      "#S............................S#",
+      "################################",
+    ],
+    [ // diagonals
+      "################################",
+      "#S............................S#",
+      "#..............S...............#",
+      "#....#....................#....#",
+      "#.....#..................#.....#",
+      "#......#................#......#",
+      "#.......#..............#.......#",
+      "#........#............#........#",
+      "#.S............................D",
+      "#...............P..............D",
+      "#........#............#........#",
+      "#.......#..............#.......#",
+      "#......#................#......#",
+      "#.....#..................#.....#",
+      "#....#....................#....#",
       "#..............S...............#",
       "#S............................S#",
       "################################",

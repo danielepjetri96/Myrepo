@@ -724,6 +724,117 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     }
   });
 
+  test('ctr data: five levels with rising difficulty, every type defined, layouts for variety', () => {
+    const lv = D.levels;
+    eq(lv.length, 5);
+    const maxWaves = c => Array.isArray(c.waves) ? c.waves[1] : c.waves;
+    for (let i = 1; i < lv.length; i++) {
+      eq(lv[i].rooms >= lv[i - 1].rooms, true, 'rooms at level ' + (i + 1));
+      eq(maxWaves(lv[i]) >= maxWaves(lv[i - 1]), true, 'waves at level ' + (i + 1));
+      eq(lv[i].perWave[1] >= lv[i - 1].perWave[1], true, 'enemies per wave at level ' + (i + 1));
+      eq(Object.keys(lv[i - 1].types).every(id => id in lv[i].types), true, 'types kept at level ' + (i + 1));
+    }
+    eq(Object.keys(lv[0].types), ['grunt']);
+    eq(Object.keys(lv[4].types).sort(), ['brute', 'grunt', 'runner', 'splitter']);
+    for (const c of lv) for (const id of Object.keys(c.types)) eq(id in D.enemies, true, id);
+    for (const e of Object.values(D.enemies)) if (e.splits) eq(e.splits.type in D.enemies, true, 'split type');
+    eq(D.layouts.length >= 8 && D.layouts.length <= 10, true, 'layouts: ' + D.layouts.length);
+  });
+
+  test('ctr: every enemy type chases at its own speed and no enemy is faster than the player', () => {
+    for (const [id, def] of Object.entries(D.enemies)) {
+      eq(def.speed < D.player.speed, true, id + ' slower than the player');
+      const sim = mk(); sim.player.x = 100; sim.player.y = 310;
+      const e = spawnNow(sim, id, 400, 310);
+      const d0 = e.x - sim.player.x;
+      step(sim, {}, 60);
+      eq(Math.abs((d0 - (e.x - sim.player.x)) - def.speed) < 6, true, id + ' closes about its speed in a second');
+    }
+  });
+
+  test('ctr: a brute takes 8 hits and hits for 2 hearts', () => {
+    const sim = mk(); const e = spawnNow(sim, 'brute', sim.player.x + 40, sim.player.y); e.speed = 0;
+    step(sim, { fire: true, aimX: e.x, aimY: e.y }, 7 * 15);
+    eq(sim.enemies.includes(e), true, 'still alive after 7 hits');
+    const c = mk(); spawnNow(c, 'brute', c.player.x + 4, c.player.y).speed = 0;
+    step(c, {}, 1); eq(c.player.hp, D.player.maxHp - 2);
+  });
+
+  test('ctr: a splitter dies into two mini runners, and the wave is not over until they are dead too', () => {
+    const sim = mk([[]]); const e = spawnNow(sim, 'splitter', sim.player.x + 60, sim.player.y); e.speed = 0;
+    for (let i = 0; i < 60 && sim.enemies.includes(e); i++) step(sim, { fire: true, aimX: e.x, aimY: e.y }, 1);   // stop firing the frame it dies
+    eq(sim.enemies.filter(x => x.type === 'minirunner').length, 2);
+    eq(sim.enemies.some(x => x.type === 'splitter'), false);
+    eq(sim.enemies.every(x => x.hp === D.enemies.minirunner.hp), true);
+  });
+
+  test('ctr: hearts drop from brutes and splitters only, restore 1 health up to the maximum', () => {
+    const always = ClearTheRoom.create({ layout: LAYOUT, waves: [[]], rng: () => 0 });
+    const g = spawnNow(always, 'grunt', always.player.x + 60, always.player.y); g.speed = 0; g.hp = 0;
+    always.updateBullets(STEP); eq(always.pickups.length, 0, 'grunts never drop');
+    const b = spawnNow(always, 'brute', always.player.x + 60, always.player.y); b.speed = 0; b.hp = 0;
+    always.updateBullets(STEP); eq(always.pickups.length, 1, 'brutes can drop');
+    const never = ClearTheRoom.create({ layout: LAYOUT, waves: [[]], rng: () => 0.99 });
+    const b2 = spawnNow(never, 'brute', 300, 300); b2.hp = 0; never.updateBullets(STEP); eq(never.pickups.length, 0, 'drop chance respected');
+
+    always.pickups = [{ x: always.player.x, y: always.player.y }];
+    step(always, {}, 1); eq(always.pickups.length, 1, 'not taken at full health');
+    always.player.hp = 3; step(always, {}, 1);
+    eq(always.player.hp, 4); eq(always.pickups.length, 0);
+  });
+
+  test('ctr: buildWaves supports a [min, max] number of waves', () => {
+    const cfg = D.levels[2], counts = new Set();
+    for (let s = 1; s <= 40; s++) counts.add(ClearTheRoom.buildWaves(cfg, seeded(s)).length);
+    eq([...counts].sort(), [2, 3]);
+  });
+
+  test('ctr: a bot that fights its way through every level survives most of the time', () => {
+    const route = (room, from, to) => {
+      const key = (i, j) => i + ',' + j, goal = key(to.i, to.j), prev = new Map(), queue = [[from.i, from.j]];
+      prev.set(key(from.i, from.j), null);
+      for (let q = 0; q < queue.length; q++) {
+        const [i, j] = queue[q];
+        if (key(i, j) === goal) break;
+        for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const ni = i + di, nj = j + dj;
+          if (room.solid[nj] && room.solid[nj][ni] === false && !prev.has(key(ni, nj))) { prev.set(key(ni, nj), [i, j]); queue.push([ni, nj]); }
+        }
+      }
+      const path = [];
+      for (let cur = [to.i, to.j]; cur; cur = prev.get(key(cur[0], cur[1]))) path.push(cur);
+      path.reverse();
+      const cur = path[1] || path[0];
+      return { x: cur[0] * 20 + 10, y: cur[1] * 20 + 10 };
+    };
+    let passed = 0, total = 0;
+    D.levels.forEach((cfg, li) => {
+      for (let seed = 1; seed <= 4; seed++) {
+        total++;
+        const lv = ClearTheRoom.createLevel({ cfg, rng: seeded(seed * 13 + li) });
+        let ev = null;
+        for (let i = 0; i < 60 * 400 && ev !== 'passed' && ev !== 'lost'; i++) {
+          const sim = lv.sim, p = sim.player, live = sim.enemies.filter(e => e.spawnT <= 0);
+          const near = live.slice().sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+          let mx = 0, my = 0;
+          const heart = sim.pickups[0];
+          if (sim.cleared) {
+            const step = route(sim.room, { i: Math.floor(p.x / 20), j: Math.floor(p.y / 20) }, sim.room.doors[0]);
+            mx = step.x - p.x; my = step.y - p.y;
+          } else if (near) {
+            const dx = p.x - near.x, dy = p.y - near.y, d = Math.hypot(dx, dy) || 1;
+            if (d < 120) { mx = dx / d + (-dy / d) * 0.6; my = dy / d + (dx / d) * 0.6; }
+            if (Math.hypot(mx, my) > 0 && sim.room.hits(p.x + mx * 8, p.y + my * 8, 6)) { mx = 320 - p.x; my = 180 - p.y; }
+          }
+          ev = lv.update(STEP, { moveX: mx, moveY: my, aimX: near ? near.x : p.x + 1, aimY: near ? near.y : p.y, fire: !!near });
+        }
+        if (ev === 'passed') passed++;
+      }
+    });
+    eq(passed >= total * 0.6, true, 'bot passed ' + passed + ' of ' + total + ' level runs');
+    window.__botScore = passed + '/' + total;
+  });
+
   test('ctr: a bot that shoots the nearest enemy and keeps its distance clears level 1', () => {
     for (let seed = 1; seed <= 5; seed++) {
       const sim = ClearTheRoom.create({ layout: LAYOUT, waves: ClearTheRoom.buildWaves(D.levels[0], seeded(seed)) });

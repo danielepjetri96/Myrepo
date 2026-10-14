@@ -189,6 +189,7 @@ function updateRoom() {
     else if (f.type === 'hit') { Sfx.enemyHit(); burst(f.x, f.y, '#a7f070', 3); }
     else if (f.type === 'kill') { Sfx.kill(); burst(f.x, f.y, '#a7f070', 10); }
     else if (f.type === 'hurt') { Sfx.hit(); shake = 0.15; }
+    else if (f.type === 'heal') { Sfx.select(); burst(f.x, f.y, '#ef4444', 6); }
   }
   sim.fx.length = 0;
   if (roomHelp > 0) roomHelp -= DT;
@@ -340,15 +341,14 @@ function drawLevel() {
   }
 }
 
-const GRUNT = [
-  '.gggggg.',
-  'gggggggg',
-  'geggggeg',
-  'gggggggg',
-  '.gggggg.',
-  '.g.gg.g.',
-];
-const GRUNT_PAL = { g: '#38b764', e: '#1a1c2c' };
+// Enemy art: pixel rows drawn at 2x, centered on the enemy. Letter c is the body color, e the eyes.
+const ENEMY_ART = {
+  grunt: { c: '#38b764', rows: ['.cccccc.', 'cccccccc', 'ceccccec', 'cccccccc', '.cccccc.', '.c.cc.c.'] },
+  runner: { c: '#ef4444', rows: ['.ccc.', 'ccccc', 'cecec', 'ccccc', '.c.c.'] },
+  brute: { c: '#8b5cf6', rows: ['..ccccc..', '.ccccccc.', 'cceccccec', 'ccccccccc', 'ccccccccc', '.ccccccc.', '.cc.c.cc.', '.cc...cc.'] },
+  splitter: { c: '#ef7d57', rows: ['.cccc.', 'cccccc', 'ceccec', 'cccccc', '.cccc.', '.c..c.'] },
+  minirunner: { c: '#ef7d57', rows: ['.cc.', 'cccc', 'cecc', '.cc.'] },
+};
 const HERO = [
   '..hhhh..',
   '.hssssh.',
@@ -385,13 +385,15 @@ function drawRoom() {
   }
   // enemies (blinking outline while they spawn)
   for (const e of sim.enemies) {
-    const x = Math.round(e.x - cam.x - 8), y = Math.round(e.y - cam.y - 6);
+    const art = ENEMY_ART[e.type], w = art.rows[0].length * 2, h = art.rows.length * 2;
+    const x = Math.round(e.x - cam.x - w / 2), y = Math.round(e.y - cam.y - h / 2);
     if (e.spawnT > 0) {
-      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = '#a7f070'; ctx.strokeRect(x + 2.5, y - 0.5, 11, 11); }
+      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = '#a7f070'; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
       continue;
     }
-    pixels(GRUNT, e.flash > 0 ? { g: '#ffffff', e: '#ffffff' } : GRUNT_PAL, x, y, 2);
+    pixels(art.rows, e.flash > 0 ? { c: '#ffffff', e: '#ffffff' } : { c: art.c, e: '#1a1c2c' }, x, y, 2);
   }
+  for (const h of sim.sim.pickups) pixels(HEART, { r: '#ef4444' }, Math.round(h.x - cam.x - 3.5), Math.round(h.y - cam.y - 3), 1);
   for (const b of sim.bullets) { ctx.fillStyle = '#ffcd75'; ctx.fillRect(Math.round(b.x - cam.x - 1.5), Math.round(b.y - cam.y - 1.5), 3, 3); }
   // player (blinks while invulnerable)
   const p = sim.player;
