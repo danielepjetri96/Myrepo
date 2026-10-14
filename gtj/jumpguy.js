@@ -5,17 +5,34 @@ const JumpGuy = {
   PLAYER_X: 48,     // screen x of the runner
   PLAYER_W: 16,
   PLAYER_H: 20,
-  SPEED: 96,        // px/s of auto-scroll
+  MIN_GAP: 0.95,    // seconds of scroll between two patterns (airtime plus reaction)
   GRAVITY: 900,
   JUMP_V: 330,      // initial upward speed: ~60px high, ~0.73s in the air
   COYOTE: 0.1,      // s after leaving the ground in which a jump still works
   BUFFER: 0.12,     // s before landing in which a pressed jump is remembered
   FORGIVE: 3,       // px trimmed off each side of the hitboxes
 
-  // Level 1: obstacle x positions along the course (all the same small spike, widely spaced).
-  LEVELS: [
-    { length: 1800, obstacles: [260, 420, 560, 700, 780, 940, 1080, 1160, 1320, 1460, 1540, 1660].map(x => ({ x, w: 14, h: 14 })) },
-  ],
+  LEAD_IN: 300,     // px of empty course before the first pattern
+  LEAD_OUT: 200,    // px of empty course before the finish
+
+  // Builds a level from JumpGuyData: patterns in random order, spaced so that each one can be jumped separately.
+  // Returns { length, speed, obstacles, groups: [{ x, span }] }.
+  buildLevel(n, rng) {
+    const J = JumpGuy, cfg = JumpGuyData.levels[n - 1];
+    rng = rng || Math.random;
+    const pool = JumpGuyData.patterns.filter(p => p.tier <= cfg.maxTier);
+    const obstacles = [], groups = [];
+    let x = J.LEAD_IN;
+    for (;;) {
+      const p = pool[Math.floor(rng() * pool.length)];
+      const span = Math.max(...p.o.map(([dx, w]) => dx + w));
+      if (x + span > cfg.length - J.LEAD_OUT) break;
+      for (const [dx, w, h] of p.o) obstacles.push({ x: x + dx, w, h });
+      groups.push({ x, span });
+      x += span + Math.round(cfg.speed * J.MIN_GAP + cfg.gapExtra[0] + rng() * (cfg.gapExtra[1] - cfg.gapExtra[0]));
+    }
+    return { length: cfg.length, speed: cfg.speed, obstacles, groups };
+  },
 
   create(def) {
     const J = JumpGuy;
@@ -49,7 +66,7 @@ const JumpGuy = {
         if (sim.y >= J.GROUND) { sim.y = J.GROUND; sim.vy = 0; sim.grounded = true; }
         else sim.grounded = false;
 
-        sim.dist += J.SPEED * dt;
+        sim.dist += def.speed * dt;
 
         if (sim.hitsObstacle()) { sim.state = 'hit'; return 'hit'; }
         if (sim.dist + J.PLAYER_X >= def.length) { sim.state = 'passed'; return 'passed'; }

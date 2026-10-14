@@ -16,7 +16,7 @@ Commit and push to GitHub regularly as work progresses, so the state of the proj
 - If the folder is not yet a git repository or has no GitHub remote configured, set that up (or ask the user for the repo URL) before continuing.
 
 - `tic-tac-toe.html` — standalone single-file game (inline `<script>`).
-- `gtj/` — GtJ, three chapters unlocked in sequence; open `gtj/index.html` (game) or `gtj/tests.html` (tests). `progression.js` (pure rules) and `jumpguy.js` (pure runner simulation) are tested; `game.js` is the canvas shell. Independent from `shooter/`.
+- `gtj/` — GtJ, three chapters unlocked in sequence; open `gtj/index.html` (game) or `gtj/tests.html` (tests). `progression.js` (pure rules) and `jumpguy-data.js` (editable levels and obstacle patterns), `jumpguy.js` (pure runner simulation and level builder) are tested; `game.js` is the canvas shell. Independent from `shooter/`.
 - `shooter/` — "Pixel Siege", a retro top-down canvas shooter (vanilla JS, no dependencies besides the Press Start 2P Google Font link).
 
 To run either, open the HTML file in a browser (`shooter/index.html` works from `file://`; no server needed).

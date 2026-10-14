@@ -2,9 +2,9 @@
 // Self-contained on purpose: nothing here depends on the Pixel Siege code.
 const W = 320, H = 180;
 
-// Chapter data for Progression. Jump Guy has a single level for now; the others are locked placeholders.
+// Chapter data for Progression. Jump Guy's level count comes from its data file; the others are placeholders.
 const CHAPTERS = [
-  { id: 'jumpguy', name: 'JUMP GUY', levels: 1 },
+  { id: 'jumpguy', name: 'JUMP GUY', levels: JumpGuyData.levels.length },
   { id: 'cleartheroom', name: 'CLEAR THE ROOM', levels: 1 },
   { id: 'onetowerdefense', name: 'ONE TOWER DEFENSE', levels: 1 },
 ];
@@ -64,12 +64,12 @@ let sim = null, deathTimer = 0, sceneTime = 0, shake = 0, gameOver = false;
 
 function startJumpGuy() {
   let run = progression.run;
-  if (!(run && run.chapter === 'jumpguy' && JumpGuy.LEVELS[run.level - 1])) { progression.startChapter('jumpguy'); run = progression.run; }
+  if (!(run && run.chapter === 'jumpguy' && JumpGuyData.levels[run.level - 1])) { progression.startChapter('jumpguy'); run = progression.run; }
   if (run) beginLevel();
 }
 function beginLevel() {
   const run = progression.run;
-  sim = JumpGuy.create(JumpGuy.LEVELS[run.level - 1]);
+  sim = JumpGuy.create(JumpGuy.buildLevel(run.level));
   hud = { lives: run.lives, level: run.level };
   scene = 'play'; sceneTime = 0; gameOver = false;
 }
@@ -124,7 +124,9 @@ function update() {
       else beginLevel();
     }
   } else if (scene === 'cleared') {
-    if (sceneTime > 0.4 && (wasPressed('Enter', 'Space', 'Escape') || click)) toMenu();
+    if (sceneTime > 0.4 && (wasPressed('Enter', 'Space', 'Escape') || click)) {
+      if (clearedChapter || wasPressed('Escape')) toMenu(); else beginLevel();
+    }
   } else if (scene === 'over') {
     if (sceneTime > 0.4 && (wasPressed('Enter', 'Space') || click)) startJumpGuy();
     else if (wasPressed('Escape')) toMenu();
@@ -217,7 +219,7 @@ function drawLevel() {
 function drawLives() {
   text('LIVES', 6, 6, '#fff', 8);
   for (let i = 0; i < Progression.LIVES; i++) pixels(HEART, { r: i < hud.lives ? '#ef4444' : '#333c57' }, 46 + i * 10, 5);
-  text('LEVEL ' + hud.level, W - 6, 6, '#fff', 8, 'right');
+  text('LEVEL ' + hud.level + '/' + JumpGuyData.levels.length, W - 6, 6, '#fff', 8, 'right');
 }
 function drawProgressBar() {
   const p = Math.min(1, (sim.dist + JumpGuy.PLAYER_X) / sim.def.length);
@@ -265,7 +267,7 @@ function draw() {
     drawProgressBar();
     if (sim.dist < 120) text('SPACE / UP / CLICK TO JUMP', W / 2, 30, '#fff', 8, 'center');
   } else if (scene === 'cleared') {
-    panel('LEVEL CLEARED!', [clearedChapter ? 'CHAPTER 1 COMPLETE - CHAPTER 2 UNLOCKED' : 'GET READY FOR THE NEXT LEVEL', '', 'PRESS ENTER OR CLICK'], '#a7f070');
+    panel(clearedChapter ? 'CHAPTER CLEARED!' : 'LEVEL CLEARED!', [clearedChapter ? 'CHAPTER 1 COMPLETE - CHAPTER 2 UNLOCKED' : 'GET READY FOR THE NEXT LEVEL', '', clearedChapter ? 'PRESS ENTER OR CLICK FOR THE MENU' : 'ENTER / CLICK: NEXT LEVEL   ESC: MENU'], '#a7f070');
   } else if (scene === 'over') {
     panel('GAME OVER', ['NO LIVES LEFT', 'YOU RESTART FROM LEVEL 1', '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], '#ef4444');
   }

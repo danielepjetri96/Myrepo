@@ -13,6 +13,7 @@
 <h1 id="summary">Esecuzione...</h1>
 <pre id="out"></pre>
 <script src="progression.js"></script>
+<script src="jumpguy-data.js"></script>
 <script src="jumpguy.js"></script>
 <script>
 // Tiny test runner: open this file in a browser, no server needed.
@@ -293,22 +294,26 @@ test('endless scores that are not finite numbers are ignored', () => {
 
 // ---- Jump Guy ----
 const STEP = 1 / 60;
-const LEVEL1 = JumpGuy.LEVELS[0];
+function seeded(seed) { // mulberry32, so level layouts are reproducible in tests
+  return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+const LEVEL1 = JumpGuy.buildLevel(1, seeded(1));
 // Runs a level with a simple bot; jumpWhen(sim) decides when to press.
 function runBot(def, jumpWhen, maxSteps) {
   const sim = JumpGuy.create(def);
-  for (let i = 0; i < (maxSteps || 4000); i++) {
+  for (let i = 0; i < (maxSteps || 6000); i++) {
     const ev = sim.update(STEP, { pressed: !!jumpWhen && jumpWhen(sim) });
     if (ev) return { ev, sim, steps: i + 1 };
   }
   return { ev: null, sim };
 }
-function nextObstacleGap(sim) {
-  const front = sim.dist + JumpGuy.PLAYER_X + JumpGuy.PLAYER_W;
-  const o = sim.def.obstacles.find(o => o.x + o.w > front - JumpGuy.PLAYER_W);
-  return o ? o.x - front : Infinity;
-}
-const bot = sim => sim.grounded && nextObstacleGap(sim) < 24 && nextObstacleGap(sim) > 0;
+// Jumps so that the middle of the next obstacle group is under the runner at the top of the arc.
+const bot = sim => {
+  if (!sim.grounded) return false;
+  const rear = sim.dist + JumpGuy.PLAYER_X, center = rear + JumpGuy.PLAYER_W / 2;
+  const g = sim.def.groups.find(g => g.x + g.span > rear);
+  return !!g && g.x + g.span / 2 - center <= sim.def.speed * 0.37;
+};
 
 test('doing nothing hits the first obstacle', () => {
   const r = runBot(LEVEL1, null);
@@ -358,6 +363,52 @@ test('an obstacle grazing the edge of the hitbox is forgiven', () => {
   const x = JumpGuy.PLAYER_X + JumpGuy.PLAYER_W + 1; // overlaps by 1px, less than the forgiveness
   const sim = JumpGuy.create({ length: 9999, obstacles: [{ x, w: 14, h: 14 }] });
   eq(sim.hitsObstacle(), false);
+});
+
+test('level data: about 5 levels, speed never decreases and ends at the maximum', () => {
+  const lv = JumpGuyData.levels;
+  eq(lv.length >= 4 && lv.length <= 6, true, 'about 5 levels');
+  for (let i = 1; i < lv.length; i++) eq(lv[i].speed >= lv[i - 1].speed, true, 'speed at level ' + (i + 1));
+  eq(lv[lv.length - 1].speed, Math.max(...lv.map(l => l.speed)));
+});
+
+test('there are 20 to 30 obstacle patterns', () => {
+  const n = JumpGuyData.patterns.length;
+  eq(n >= 20 && n <= 30, true, String(n));
+});
+
+test('every level has patterns in random order and varies between builds', () => {
+  const a = JumpGuy.buildLevel(5, seeded(1)), b = JumpGuy.buildLevel(5, seeded(2));
+  eq(a.obstacles.length > 10, true);
+  eq(JSON.stringify(a.obstacles) !== JSON.stringify(b.obstacles), true);
+});
+
+test('lower levels only use patterns up to their tier', () => {
+  const easy = JumpGuyData.patterns.filter(p => p.tier <= JumpGuyData.levels[0].maxTier);
+  const maxH = Math.max(...easy.flatMap(p => p.o.map(o => o[2])));
+  for (let s = 1; s <= 5; s++) eq(JumpGuy.buildLevel(1, seeded(s)).obstacles.every(o => o.h <= maxH), true);
+});
+
+test('every pattern can be cleared with one jump at every level speed it appears in', () => {
+  JumpGuyData.levels.forEach((cfg, li) => {
+    for (const p of JumpGuyData.patterns.filter(p => p.tier <= cfg.maxTier)) {
+      const obstacles = p.o.map(([dx, w, h]) => ({ x: 200 + dx, w, h }));
+      let cleared = false;
+      for (let start = 0; start < 200 && !cleared; start++) { // try every jump moment
+        const sim = JumpGuy.create({ length: 420, speed: cfg.speed, obstacles });
+        let ev = null;
+        for (let i = 0; i < 400 && !ev; i++) ev = sim.update(STEP, { pressed: i === start });
+        cleared = ev === 'passed';
+      }
+      eq(cleared, true, 'level ' + (li + 1) + ' pattern ' + JSON.stringify(p.o));
+    }
+  });
+});
+
+test('the bot clears every level from several random layouts', () => {
+  for (let n = 1; n <= JumpGuyData.levels.length; n++) {
+    for (let seed = 1; seed <= 5; seed++) eq(runBot(JumpGuy.buildLevel(n, seeded(seed * 7 + n)), bot, 9000).ev, 'passed', 'level ' + n + ' seed ' + seed);
+  }
 });
 
 // ---- report ----
