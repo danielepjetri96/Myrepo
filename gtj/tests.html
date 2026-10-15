@@ -923,16 +923,17 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
   });
 
   test('ctr boss: touching it costs 1 health, being hit by its charge costs 2', () => {
-    const touch = state => {
-      const sim = mkBoss(), b = sim.boss;
-      b.state = state; b.timer = 1; b.dirX = 0; b.dirY = 0;
-      sim.player.x = b.x; sim.player.y = b.y;
+    const touchNow = sim => {
+      sim.player.x = sim.boss.x; sim.player.y = sim.boss.y; sim.player.invuln = 0;
       const hp = sim.player.hp;
       step(sim, {}, 1);
       return hp - sim.player.hp;
     };
-    eq(touch('chase'), 1, 'chasing');
-    eq(touch('charge'), D.boss.charge.damage, 'charging');
+    eq(touchNow(mkFarBoss()), 1, 'chasing');
+    const sim = mkFarBoss();
+    step(sim, {}, secs(6.1));
+    eq(sim.boss.state, 'charge');
+    eq(touchNow(sim), D.boss.charge.damage, 'charging');
   });
 
   test('ctr boss: below half health it summons 3 runners right away and again every 10 seconds', () => {

@@ -195,24 +195,24 @@ const ClearTheRoom = {
           sim.enemies = [];
           return;
         }
-        const def = D.enemies[e.type] || D.boss;
-        if (def.splits) {
-          // Children appear on opposite sides of the corpse (when there is room) and blink briefly before they attack.
-          for (let k = 0; k < def.splits.count; k++) {
-            const a = (k / def.splits.count) * Math.PI * 2, half = D.enemies[def.splits.type].size / 2;
-            const x = e.x + Math.cos(a) * 8, y = e.y + Math.sin(a) * 8;
-            const free = !room.hits(x, y, half);
-            sim.enemies.push(sim.makeEnemy(def.splits.type, free ? x : e.x, free ? y : e.y, D.splitWarning));
-          }
-        }
+        const def = D.enemies[e.type];
+        if (def.splits) sim.spawnAround(e, def.splits.type, def.splits.count, 8, D.splitWarning);
         if (def.dropChance > 0 && rng() < def.dropChance) sim.pickups.push({ x: e.x, y: e.y });
       },
 
-      makeEnemy(id, x, y, spawnT) {
-        const def = D.enemies[id] || D.boss;
-        const e = { type: id, x, y, size: def.size, hp: def.hp, speed: def.speed, damage: def.damage, spawnT, flash: 0 };
-        if (id === 'boss') { e.state = 'chase'; e.timer = def.charge.every; e.summonTimer = 0; }
-        return e;
+      // def defaults to the enemy type's entry in the data; the Boss passes its own.
+      makeEnemy(id, x, y, spawnT, def = D.enemies[id]) {
+        return { type: id, x, y, size: def.size, hp: def.hp, maxHp: def.hp, speed: def.speed, damage: def.damage, spawnT, flash: 0 };
+      },
+
+      // Places count enemies of a type in a ring of the given radius around e (on e itself where a wall is in the way).
+      spawnAround(e, id, count, radius, spawnT) {
+        const half = D.enemies[id].size / 2;
+        for (let k = 0; k < count; k++) {
+          const a = (k / count) * Math.PI * 2, x = e.x + Math.cos(a) * radius, y = e.y + Math.sin(a) * radius;
+          const free = !room.hits(x, y, half);
+          sim.enemies.push(sim.makeEnemy(id, free ? x : e.x, free ? y : e.y, spawnT));
+        }
       },
 
       // Hearts are picked up by touching them, but only when there is health to restore.
@@ -230,10 +230,10 @@ const ClearTheRoom = {
         for (const e of sim.enemies) {
           e.flash = Math.max(0, (e.flash || 0) - dt);
           if (e.spawnT > 0) { e.spawnT -= dt; continue; }
-          if (e.type === 'boss') sim.updateBoss(e, dt); else sim.chase(e, dt);
+          if (e === sim.boss) sim.updateBoss(e, dt); else sim.chase(e, dt);
 
           if (p.invuln <= 0 && Math.abs(p.x - e.x) < (p.size + e.size) / 2 - 1 && Math.abs(p.y - e.y) < (p.size + e.size) / 2 - 1) {
-            p.hp -= e.state === 'charge' ? D.boss.charge.damage : e.damage;
+            p.hp -= e.damage;
             p.invuln = P.invuln;
             sim.fx.push({ type: 'hurt', x: p.x, y: p.y });
             if (p.hp <= 0) return true;
@@ -257,10 +257,11 @@ const ClearTheRoom = {
       },
 
       // The Boss alternates chasing with a charge: chase, stand still and blink (warning), then dash.
+      // e.timer counts down the current state: chase time left before the warning, warning left, or dash left.
       updateBoss(e, dt) {
         const C = D.boss.charge, S = D.boss.summon;
         e.timer -= dt;
-        if (e.hp < D.boss.hp * S.below) {
+        if (e.hp < e.maxHp * S.below) {
           e.summonTimer -= dt;
           if (e.summonTimer <= 0) { sim.summon(e); e.summonTimer = S.every; }
         }
@@ -274,22 +275,18 @@ const ClearTheRoom = {
             sim.fx.push({ type: 'warn', x: e.x, y: e.y });
           }
         } else if (e.state === 'warning') {
-          if (e.timer <= 0) { e.state = 'charge'; e.timer = C.duration; }
+          if (e.timer <= 0) { e.state = 'charge'; e.timer = C.duration; e.damage = C.damage; }
         } else {
           sim.move(e, e.dirX * C.speed * dt, e.dirY * C.speed * dt);
-          if (e.timer <= 0) { e.state = 'chase'; e.timer = C.every; }
+          if (e.timer <= 0) { e.state = 'chase'; e.timer = C.every; e.damage = D.boss.damage; }
         }
       },
 
       // The Boss calls reinforcements around itself; they blink briefly before they attack.
       summon(e) {
-        const S = D.boss.summon, half = D.enemies[S.type].size / 2;
+        const S = D.boss.summon;
         sim.fx.push({ type: 'summon', x: e.x, y: e.y });
-        for (let k = 0; k < S.count; k++) {
-          const a = (k / S.count) * Math.PI * 2, x = e.x + Math.cos(a) * e.size, y = e.y + Math.sin(a) * e.size;
-          const free = !room.hits(x, y, half);
-          sim.enemies.push(sim.makeEnemy(S.type, free ? x : e.x, free ? y : e.y, D.spawnWarning));
-        }
+        sim.spawnAround(e, S.type, S.count, e.size, D.spawnWarning);
       },
 
       // Direction an enemy walks to reach the player: straight when nothing is in the way,
@@ -361,7 +358,7 @@ const ClearTheRoom = {
     };
     if (boss) {
       const at = room.spawns[0];
-      sim.boss = sim.makeEnemy('boss', at.x, at.y, 0);
+      sim.boss = Object.assign(sim.makeEnemy('boss', at.x, at.y, 0, D.boss), { state: 'chase', timer: D.boss.charge.every, summonTimer: 0 });
       sim.enemies.push(sim.boss);
     }
     return sim;

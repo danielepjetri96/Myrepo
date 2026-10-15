@@ -346,14 +346,14 @@ function drawLevel() {
   }
 }
 
-// Enemy art: pixel rows drawn at 2x, centered on the enemy. Letter c is the body color, e the eyes.
+// Enemy art: pixel rows drawn at 2x, centered on the enemy. Letter c is the body color, e the eyes (dark unless set).
 const ENEMY_ART = {
   grunt: { c: '#38b764', rows: ['.cccccc.', 'cccccccc', 'ceccccec', 'cccccccc', '.cccccc.', '.c.cc.c.'] },
   runner: { c: '#ef4444', rows: ['.ccc.', 'ccccc', 'cecec', 'ccccc', '.c.c.'] },
   brute: { c: '#8b5cf6', rows: ['..ccccc..', '.ccccccc.', 'cceccccec', 'ccccccccc', 'ccccccccc', '.ccccccc.', '.cc.c.cc.', '.cc...cc.'] },
   splitter: { c: '#ef7d57', rows: ['.cccc.', 'cccccc', 'ceccec', 'cccccc', '.cccc.', '.c..c.'] },
   minirunner: { c: '#ef7d57', rows: ['.cc.', 'cccc', 'cecc', '.cc.'] },
-  boss: { c: '#b13e53', rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccccccccccccc', 'ccceeccceeccc', 'ccceeccceeccc', 'ccccccccccccc', 'cccc.....cccc', 'ccccc...ccccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
+  boss: { c: '#b13e53', e: '#ffcd75', rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccccccccccccc', 'ccceeccceeccc', 'ccceeccceeccc', 'ccccccccccccc', 'cccc.....cccc', 'ccccc...ccccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
 };
 const HERO = [
   '..hhhh..',
@@ -398,7 +398,7 @@ function drawRoom() {
       continue;
     }
     const warning = e.state === 'warning' && Math.floor(e.timer * 12) % 2;   // the Boss blinks before it charges
-    pixels(art.rows, e.flash > 0 || warning ? { c: '#ffffff', e: '#ffffff' } : { c: art.c, e: e.type === 'boss' ? '#ffcd75' : '#1a1c2c' }, x, y, 2);
+    pixels(art.rows, e.flash > 0 || warning ? { c: '#ffffff', e: '#ffffff' } : { c: art.c, e: art.e || '#1a1c2c' }, x, y, 2);
   }
   for (const h of sim.pickups) pixels(HEART, { r: '#ef4444' }, Math.round(h.x - cam.x - 3.5), Math.round(h.y - cam.y - 3), 1);
   for (const b of sim.bullets) { ctx.fillStyle = '#ffcd75'; ctx.fillRect(Math.round(b.x - cam.x - 1.5), Math.round(b.y - cam.y - 1.5), 3, 3); }
@@ -436,7 +436,7 @@ function drawLives() {
 function drawBossBar(b) {
   text('BOSS', W / 2, 4, '#ef4444', 8, 'center');
   ctx.fillStyle = '#000'; ctx.fillRect(100, 14, 120, 6);
-  ctx.fillStyle = '#b13e53'; ctx.fillRect(101, 15, Math.round(118 * Math.max(0, b.hp) / ClearTheRoomData.boss.hp), 4);
+  ctx.fillStyle = '#b13e53'; ctx.fillRect(101, 15, Math.round(118 * Math.max(0, b.hp) / b.maxHp), 4);
 }
 function drawProgressBar() {
   const p = Math.min(1, (sim.dist + JumpGuy.PLAYER_X) / sim.def.length);
