@@ -1228,6 +1228,74 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     eq([lost(a, 'orc'), lost(b, 'orc'), lost(out, 'orc')], [M.damage, M.damage, 0]);
     eq(sim.meteors.length, 0);
   });
+
+  // ---- enemies ----
+  const gapTo = (t, e) => Math.max(Math.abs(t.x - e.x), Math.abs(t.y - e.y)) - (t.size + e.size) / 2;
+
+  test('otd enemies: each type walks at its own speed', () => {
+    for (const id of ['goblin', 'wolf', 'orc', 'shaman']) {
+      const sim = arena(), e = sim.addEnemy(id, 20, 90, 0);
+      eq(Math.abs(walked(sim, e, 1) - D.enemies[id].speed) < 0.5, true, id);
+    }
+  });
+
+  test('otd enemies: an orc hits the Torretta for 3 a second once it arrives', () => {
+    const sim = arena(), t = sim.tower, e = sim.addEnemy('orc', t.x + (t.size + D.enemies.orc.size) / 2 + 1, t.y, 0);
+    step(sim, {}, secs(0.2));
+    const hp = t.hp;
+    step(sim, {}, secs(2));
+    eq(hp - t.hp, 2 * D.enemies.orc.damage);
+  });
+
+  test('otd enemies: a shaman stops 60 px from the Torretta and strikes it from there every 2 s', () => {
+    const sim = arena(), t = sim.tower, S = D.enemies.shaman, e = sim.addEnemy('shaman', 10, 90, 0);
+    for (let i = 0; i < secs(30) && !sim.fx.some(f => f.type === 'hurt'); i++) step(sim, {});
+    eq(Math.abs(gapTo(t, e) - S.range) < 0.01, true, 'stopped at its range, gap ' + gapTo(t, e));
+    const hp = t.hp, at = { x: e.x, y: e.y };
+    step(sim, {}, secs(4.5));
+    eq(hp - t.hp, 2 * S.damage, 'two strikes in 4.5 s');
+    eq({ x: e.x, y: e.y }, at, 'it stays at range');
+  });
+
+  // ---- Boss ----
+  test('otd boss: a level with a Boss ends with a wave of the Boss alone', () => {
+    const waves = OneTower.buildWaves({ waves: 2, perWave: [3, 3], types: { goblin: 1 }, boss: true }, seeded(1));
+    eq(waves.length, 3);
+    eq(waves[2], ['boss']);
+    eq(waves[0].includes('boss') || waves[1].includes('boss'), false);
+  });
+
+  test('otd boss: walks slowly, hits hard, and is exposed for its health bar', () => {
+    const B = D.enemies.boss, sim = arena(), b = sim.addEnemy('boss', 20, 90, 0);
+    eq(sim.boss, b);
+    eq(b.hp, B.hp);
+    eq(Math.abs(walked(sim, b, 1) - B.speed) < 0.3, true, 'its speed');
+    const t = sim.tower, close = sim.addEnemy('boss', t.x + (t.size + B.size) / 2 + 0.5, t.y, 0);
+    sim.enemies.splice(sim.enemies.indexOf(b), 1);
+    step(sim, {}, secs(0.2));
+    const hp = t.hp;
+    step(sim, {}, secs(1));
+    eq(hp - t.hp, B.damage, 'its damage per second');
+  });
+
+  test('otd boss: summons 3 goblins around itself every 10 s', () => {
+    const B = D.enemies.boss, sim = arena(), b = sim.addEnemy('boss', 20, 90, 0);
+    sim.tower.hp = 1e6;   // the summoned goblins must not end the level
+    const goblins = () => sim.enemies.filter(e => e.type === 'goblin').length;
+    step(sim, {}, secs(B.summon.every - 0.2));
+    eq(goblins(), 0, 'nothing before 10 s');
+    step(sim, {}, secs(0.4));
+    eq(goblins(), B.summon.count);
+    eq(sim.enemies.filter(e => e.type === 'goblin').every(g => Math.hypot(g.x - b.x, g.y - b.y) < 40), true, 'around the Boss');
+    step(sim, {}, secs(B.summon.every));
+    eq(goblins(), 2 * B.summon.count);
+  });
+
+  test('otd boss: Frost slows it only half as much', () => {
+    const B = D.enemies.boss, F = D.spells.frost, sim = arena(), b = sim.addEnemy('boss', 40, 90, 0);
+    cast(sim, 3, b.x, b.y);
+    eq(Math.abs(walked(sim, b, 1) - B.speed * (1 - F.slow * B.frostFactor)) < 0.2, true);
+  });
 }
 
 // ---- report ----

@@ -6,7 +6,7 @@ const OneTower = {
   H: 180,
   SPELLS: ['bolt', 'fireball', 'frost', 'lightning', 'meteor'],   // keys 1-5
 
-  // Lists the enemy types of each wave for a level config ({ waves, perWave: [min, max], types: { id: weight } }).
+  // Lists the enemy types of each wave for a level config ({ waves, perWave: [min, max], types: { id: weight }, boss }).
   buildWaves(cfg, rng) {
     rng = rng || Math.random;
     const ids = Object.keys(cfg.types), total = ids.reduce((s, id) => s + cfg.types[id], 0);
@@ -16,7 +16,9 @@ const OneTower = {
       return ids[ids.length - 1];
     };
     const [min, max] = cfg.perWave;
-    return Array.from({ length: cfg.waves }, () => Array.from({ length: min + Math.floor(rng() * (max - min + 1)) }, pick));
+    const waves = Array.from({ length: cfg.waves }, () => Array.from({ length: min + Math.floor(rng() * (max - min + 1)) }, pick));
+    if (cfg.boss) waves.push(['boss']);
+    return waves;
   },
 
   // waves: lists of enemy types, one list per wave (see buildWaves). spells: the unlocked spells.
@@ -39,6 +41,8 @@ const OneTower = {
       spells,                 // unlocked spells
       selected: 'bolt',
       recharge: Object.fromEntries(OneTower.SPELLS.map(id => [id, 0])),   // s left of each spell's Ricarica
+
+      get boss() { return sim.enemies.find(e => e.type === 'boss') || null; },
 
       // input: { aimX, aimY (field coordinates), fire, select (key 1-5 pressed this step) }. Returns 'passed', 'lost' or null.
       update(dt, input) {
@@ -94,7 +98,7 @@ const OneTower = {
         } else if (id === 'meteor') {
           sim.meteors.push({ x, y, t: S.delay });
         } else if (id === 'frost') {
-          for (const e of sim.active()) if (Math.hypot(e.x - x, e.y - y) <= S.radius) { e.slow = S.slow; e.slowT = S.duration; }
+          for (const e of sim.active()) if (Math.hypot(e.x - x, e.y - y) <= S.radius) { e.slow = S.slow * e.frostFactor; e.slowT = S.duration; }
         }
       },
 
@@ -139,16 +143,28 @@ const OneTower = {
         sim.bolts = sim.bolts.filter(b => !b.dead);
       },
 
-      // Enemies walk straight to the Torretta, stop when they touch it and hit it every attackEvery seconds (the first hit on arrival).
+      // Enemies walk straight to the Torretta, stop when they touch it (or get within their range) and hit it every attackEvery
+      // seconds (the first hit on arrival). Frost slows them down while it lasts.
       updateEnemies(dt) {
-        const t = sim.tower;
+        const t = sim.tower, called = [];
         for (const e of sim.enemies) {
           e.flash = Math.max(0, e.flash - dt);
           if (e.spawnT > 0) { e.spawnT -= dt; continue; }
+          if (e.summon) {   // the Boss calls enemies around itself; they blink before they walk in
+            e.summonT -= dt;
+            if (e.summonT <= 0) {
+              e.summonT += e.summon.every;
+              for (let k = 0; k < e.summon.count; k++) {
+                const a = k / e.summon.count * Math.PI * 2;
+                called.push([e.summon.type, e.x + Math.cos(a) * e.size, e.y + Math.sin(a) * e.size]);
+              }
+              sim.fx.push({ type: 'summon', x: e.x, y: e.y });
+            }
+          }
           e.slowT = Math.max(0, e.slowT - dt);
           const speed = e.speed * (e.slowT > 0 ? 1 - e.slow : 1);
           const dx = t.x - e.x, dy = t.y - e.y, d = Math.hypot(dx, dy) || 1, axis = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
-          const gap = axis - (t.size + e.size) / 2;   // distance left before touching, on the dominant axis
+          const gap = axis - (t.size + e.size) / 2 - e.range;   // distance left before touching (or reaching its range), on the dominant axis
           if (gap > 1e-9) {
             const s = Math.min(speed * dt, gap * d / axis);   // the last step lands exactly against the Torretta
             e.x += dx / d * s; e.y += dy / d * s;
@@ -158,9 +174,11 @@ const OneTower = {
               e.attackT += e.attackEvery;
               t.hp -= e.damage;
               sim.fx.push({ type: 'hurt', x: e.x, y: e.y });
+              if (e.range > 0) sim.fx.push({ type: 'zap', x: e.x, y: e.y, tx: t.x, ty: t.y });   // a strike from a distance
             }
           }
         }
+        for (const [id, x, y] of called) sim.addEnemy(id, x, y, D.spawnWarning);
       },
 
       // A wave starts after a pause, then its enemies walk in one at a time. Returns 'passed' once the last wave is defeated.
@@ -194,7 +212,9 @@ const OneTower = {
       // Puts an enemy on the field; it blinks for spawnT seconds before it moves. Returns it.
       addEnemy(id, x, y, spawnT) {
         const def = D.enemies[id];
-        const e = { type: id, x, y, size: def.size, hp: def.hp, speed: def.speed, damage: def.damage, attackEvery: def.attackEvery, attackT: 0, spawnT, flash: 0, slow: 0, slowT: 0 };
+        const e = { type: id, x, y, size: def.size, hp: def.hp, maxHp: def.hp, speed: def.speed, damage: def.damage, attackEvery: def.attackEvery,
+          range: def.range || 0, frostFactor: def.frostFactor || 1, summon: def.summon, summonT: def.summon ? def.summon.every : 0,
+          attackT: 0, spawnT, flash: 0, slow: 0, slowT: 0 };
         sim.enemies.push(e);
         return e;
       },

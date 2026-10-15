@@ -31,10 +31,13 @@ const OneTowerData = {
     wolf:    { hp: 2,  speed: 30, damage: 1, attackEvery: 1, size: 10 },   // fast and fragile
     orc:     { hp: 15, speed: 9,  damage: 3, attackEvery: 1, size: 14 },   // slow and tough
     shaman:  { hp: 5,  speed: 12, damage: 1, attackEvery: 2, size: 10, range: 60 },   // stops at a distance and strikes from there
+    // The Boss: the last wave of the last level, alone. Every `summon.every` s it calls `count` enemies around itself;
+    // Frost slows it only by `frostFactor` of the usual amount.
+    boss:    { hp: 120, speed: 6, damage: 5, attackEvery: 1, size: 22, frostFactor: 0.5, summon: { every: 10, type: 'goblin', count: 3 } },
   },
 
   // One entry per level, easiest first. waves: waves in the level; perWave: [min, max] enemies per wave;
-  // types: spawn weights by enemy type.
+  // types: spawn weights by enemy type; boss: one more wave at the end, the Boss alone.
   levels: [
     { waves: 3, perWave: [4, 5], types: { goblin: 1 } },
   ],
