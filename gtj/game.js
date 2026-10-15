@@ -78,7 +78,7 @@ let clearedChapter = false;
 let chapterId = 'jumpguy';           // chapter being played: jumpguy | cleartheroom
 let mode = 'chapter';               // chapter | endless
 let endlessResult = null;           // { score, record, newRecord } after an endless run
-let roomHelp = 0;                   // seconds left of the controls hint in Clear the Room
+let controlsHint = 0;               // seconds left of the controls hint shown at the start of play
 let sim = null, deathTimer = 0, sceneTime = 0, shake = 0, gameOver = false;
 
 // Starts (or resumes, if a saved run exists) a chapter at its saved level.
@@ -91,14 +91,7 @@ function startChapter(id) {
 }
 function beginLevel() {
   const run = progression.run;
-  if (chapterId === 'cleartheroom') {
-    const cfg = ClearTheRoomData.levels[run.level - 1];
-    sim = ClearTheRoom.createLevel({ cfg });
-  } else if (chapterId === 'onetowerdefense') {
-    sim = OneTower.create({ waves: OneTower.buildWaves(OneTowerData.levels[run.level - 1]) });
-  } else {
-    sim = JumpGuy.create(JumpGuy.buildLevel(run.level));
-  }
+  sim = PLAY[chapterId].level(run.level);
   hud = { lives: run.lives, level: run.level };
   enterPlay();
 }
@@ -109,7 +102,7 @@ function startEndless(id) {
 }
 // Common start of play, once sim is ready.
 function enterPlay() {
-  roomHelp = 4;                         // the controls hint (shown in Clear the Room only)
+  controlsHint = 4;
   particles = []; mouse.down = false;   // a button still held from the menu must not fire
   scene = 'play'; sceneTime = 0; gameOver = false;
 }
@@ -189,16 +182,25 @@ function camera() {
   };
 }
 
-function updateRoom() {
-  const cam = camera();
-  const k = c => keysDown.has(c);
-  const ev = sim.update(DT, {
-    moveX: (k('KeyD') || k('ArrowRight') ? 1 : 0) - (k('KeyA') || k('ArrowLeft') ? 1 : 0),
-    moveY: (k('KeyS') || k('ArrowDown') ? 1 : 0) - (k('KeyW') || k('ArrowUp') ? 1 : 0),
-    aimX: mouse.x + cam.x,
-    aimY: mouse.y + cam.y,
-    fire: mouse.down,
-  });
+// What differs between the chapters while playing: how a level is built, how a step reads the input, and how the
+// field, the HUD and the in-play messages are drawn. hearts: Salute is shown as hearts on the first HUD row.
+const PLAY = {
+  jumpguy: {
+    level: n => JumpGuy.create(JumpGuy.buildLevel(n)),
+    update: updateRunner, draw: drawLevel, hud: drawLivesAndLevel, messages: drawRunnerMessages,
+  },
+  cleartheroom: {
+    level: n => ClearTheRoom.createLevel({ cfg: ClearTheRoomData.levels[n - 1] }),
+    update: updateRoom, draw: drawRoom, hud: drawRoomHud, messages: drawRoomMessages, hearts: true, hideCursor: true,
+  },
+  onetowerdefense: {
+    level: n => OneTower.create({ waves: OneTower.buildWaves(OneTowerData.levels[n - 1]) }),
+    update: updateTower, draw: drawField, hud: drawFieldHud, messages: drawFieldMessages, hideCursor: true,
+  },
+};
+
+// Plays the sounds and particles queued by the simulation, then ages the controls hint and the particles.
+function playFx() {
   for (const f of sim.fx) {
     if (f.type === 'shoot') Sfx.shoot();
     else if (f.type === 'hit') { Sfx.enemyHit(); burst(f.x, f.y, '#a7f070', 3); }
@@ -209,23 +211,28 @@ function updateRoom() {
     else if (f.type === 'summon') { Sfx.summon(); burst(f.x, f.y, '#ef4444', 14); }
   }
   sim.fx.length = 0;
-  if (roomHelp > 0) roomHelp -= DT;
+  if (controlsHint > 0) controlsHint -= DT;
   updateParticles();
+}
+
+function updateRoom() {
+  const cam = camera();
+  const k = c => keysDown.has(c);
+  const ev = sim.update(DT, {
+    moveX: (k('KeyD') || k('ArrowRight') ? 1 : 0) - (k('KeyA') || k('ArrowLeft') ? 1 : 0),
+    moveY: (k('KeyS') || k('ArrowDown') ? 1 : 0) - (k('KeyW') || k('ArrowUp') ? 1 : 0),
+    aimX: mouse.x + cam.x,
+    aimY: mouse.y + cam.y,
+    fire: mouse.down,
+  });
+  playFx();
   if (ev === 'room') { Sfx.select(); particles = []; return null; }
   return ev === 'lost' ? 'hit' : ev;
 }
 
 function updateTower() {
   const ev = sim.update(DT, { aimX: mouse.x, aimY: mouse.y, fire: mouse.down });
-  for (const f of sim.fx) {
-    if (f.type === 'shoot') Sfx.shoot();
-    else if (f.type === 'hit') { Sfx.enemyHit(); burst(f.x, f.y, '#a7f070', 3); }
-    else if (f.type === 'kill') { Sfx.kill(); burst(f.x, f.y, '#a7f070', 10); }
-    else if (f.type === 'hurt') { Sfx.hit(); shake = 0.1; burst(f.x, f.y, '#94a3b8', 4); }
-  }
-  sim.fx.length = 0;
-  if (roomHelp > 0) roomHelp -= DT;
-  updateParticles();
+  playFx();
   return ev === 'lost' ? 'hit' : ev;
 }
 
@@ -249,7 +256,7 @@ function update() {
   else if (scene === 'play') {
     if (wasPressed('Escape', 'KeyP')) { scene = 'pause'; sceneTime = 0; }
     else {
-      const ev = chapterId === 'cleartheroom' ? updateRoom() : chapterId === 'onetowerdefense' ? updateTower() : updateRunner();
+      const ev = PLAY[chapterId].update();
       if (ev === 'hit') {
         Sfx.hit(); shake = 0.3; deathTimer = 0.9; scene = 'dying'; sceneTime = 0;
         if (mode === 'endless') {
@@ -408,7 +415,7 @@ const TOWER = [
 const GOBLIN = ['c......c', '.cccccc.', 'cceccecc', '.cccccc.', '..cccc..', '.cc..cc.'];
 const SPELL_NAMES = ['BOLT', 'FIREBALL', 'FROST', 'LIGHTNING', 'METEOR'];
 
-function drawTower() {
+function drawField() {
   ctx.fillStyle = '#5a8f3c'; ctx.fillRect(0, 0, W, H);
   for (let j = 0; j < H; j += 12) for (let i = (j / 12) % 2 * 6; i < W; i += 12) { ctx.fillStyle = '#4f8235'; ctx.fillRect(i, j, 2, 2); }
   const t = sim.tower;
@@ -490,26 +497,44 @@ function drawRoom() {
 }
 
 function drawLives() {
-  const hearts = chapterId === 'cleartheroom';   // Salute is shown on the first row, pushing lives down
-  if (hearts) for (let i = 0; i < sim.player.maxHp; i++) pixels(HEART, { r: i < sim.player.hp ? '#ef4444' : '#333c57' }, 6 + i * 10, 5);
+  const c = PLAY[chapterId];
+  if (c.hearts) for (let i = 0; i < sim.player.maxHp; i++) pixels(HEART, { r: i < sim.player.hp ? '#ef4444' : '#333c57' }, 6 + i * 10, 5);
   if (mode === 'endless') {
     const e = ENDLESS[chapterId];
-    text('ONE LIFE', 6, hearts ? 16 : 6, '#fff', 8);
+    text('ONE LIFE', 6, c.hearts ? 16 : 6, '#fff', 8);
     text(e.score(sim) + e.unit, W - 6, 6, '#fff', 8, 'right');
     text('BEST ' + progression.record(chapterId) + e.unit, W - 6, 18, '#ffcd75', 8, 'right');
     return;
   }
-  if (hearts) {
-    text('LIVES ' + hud.lives, 6, 16, '#fff', 8);
-    if (sim.boss) drawBossBar(sim.boss);
-    else text('ROOM ' + (sim.roomIndex + 1) + '/' + sim.roomCount, W / 2, 6, '#fff', 8, 'center');
-    text('LEVEL ' + hud.level + '/' + CHAPTERS.find(c => c.id === chapterId).levels, W - 6, 6, '#fff', 8, 'right');
-    return;
-  }
+  c.hud();
+}
+const drawLevelCount = () => text('LEVEL ' + hud.level + '/' + CHAPTERS.find(c => c.id === chapterId).levels, W - 6, 6, '#fff', 8, 'right');
+function drawLivesAndLevel() {
   text('LIVES', 6, 6, '#fff', 8);
   for (let i = 0; i < Progression.LIVES; i++) pixels(HEART, { r: i < hud.lives ? '#ef4444' : '#333c57' }, 46 + i * 10, 5);
-  text('LEVEL ' + hud.level + '/' + CHAPTERS.find(c => c.id === chapterId).levels, W - 6, 6, '#fff', 8, 'right');
-  if (chapterId === 'onetowerdefense') text('WAVE ' + Math.max(1, sim.waveIndex) + '/' + sim.waveCount, W / 2, 6, '#fff', 8, 'center');
+  drawLevelCount();
+}
+function drawRoomHud() {
+  text('LIVES ' + hud.lives, 6, 16, '#fff', 8);
+  if (sim.boss) drawBossBar(sim.boss);
+  else text('ROOM ' + (sim.roomIndex + 1) + '/' + sim.roomCount, W / 2, 6, '#fff', 8, 'center');
+  drawLevelCount();
+}
+function drawFieldHud() {
+  drawLivesAndLevel();
+  text('WAVE ' + Math.max(1, sim.waveIndex) + '/' + sim.waveCount, W / 2, 6, '#fff', 8, 'center');
+}
+function drawRunnerMessages() {
+  if (mode === 'chapter') drawProgressBar();
+  if (sim.dist < 120) text('SPACE / UP / CLICK TO JUMP', W / 2, 30, '#fff', 8, 'center');
+}
+function drawRoomMessages() {
+  if (sim.cleared) text('ROOM CLEARED - TAKE THE OPEN DOOR', W / 2, 160, '#a7f070', 8, 'center');
+  else if (controlsHint > 0) text('WASD MOVE   MOUSE AIM + HOLD CLICK TO SHOOT', W / 2, 160, '#fff', 8, 'center');
+}
+function drawFieldMessages() {
+  if (controlsHint > 0) text('AIM WITH THE MOUSE, HOLD CLICK TO CAST THE BOLT', W / 2, 30, '#fff', 8, 'center');
+  if (sim.enemies.length === 0 && sim.waveIndex < sim.waveCount) text('WAVE ' + (sim.waveIndex + 1) + '/' + sim.waveCount, W / 2, 60, '#ffcd75', 16, 'center');
 }
 function drawBossBar(b) {
   text('BOSS', W / 2, 4, '#ef4444', 8, 'center');
@@ -571,15 +596,13 @@ function drawMenu() {
 }
 
 function draw() {
-  canvas.style.cursor = scene === 'play' && chapterId !== 'jumpguy' ? 'none' : '';
+  canvas.style.cursor = scene === 'play' && PLAY[chapterId].hideCursor ? 'none' : '';
   ctx.setTransform(VIEW_SCALE, 0, 0, VIEW_SCALE, 0, 0);
   ctx.imageSmoothingEnabled = false;
   ctx.save();
   if (shake > 0) ctx.translate(Math.round((Math.random() - 0.5) * 6), Math.round((Math.random() - 0.5) * 6));
   if (scene === 'menu' || scene === 'confirm') drawMenu();
-  else if (chapterId === 'cleartheroom') drawRoom();
-  else if (chapterId === 'onetowerdefense') drawTower();
-  else drawLevel();
+  else PLAY[chapterId].draw();
   ctx.restore();
   if (scene === 'confirm') {
     ctx.fillStyle = '#0d0e17'; ctx.fillRect(0, 0, W, H);
@@ -594,18 +617,8 @@ function draw() {
     button(BTN.resume, 'P  RESUME', '#3b5dc9'); button(BTN.pauseSound, soundLabel()); button(BTN.quit, 'Q  QUIT TO MENU');
     return;
   }
-  if (scene === 'play') {
-    if (chapterId === 'cleartheroom') {
-      if (sim.cleared) text('ROOM CLEARED - TAKE THE OPEN DOOR', W / 2, 160, '#a7f070', 8, 'center');
-      else if (roomHelp > 0) text('WASD MOVE   MOUSE AIM + HOLD CLICK TO SHOOT', W / 2, 160, '#fff', 8, 'center');
-    } else if (chapterId === 'onetowerdefense') {
-      if (roomHelp > 0) text('AIM WITH THE MOUSE, HOLD CLICK TO CAST THE BOLT', W / 2, 30, '#fff', 8, 'center');
-      if (sim.enemies.length === 0 && sim.waveIndex < sim.waveCount) text('WAVE ' + (sim.waveIndex + 1) + '/' + sim.waveCount, W / 2, 60, '#ffcd75', 16, 'center');
-    } else {
-      if (mode === 'chapter') drawProgressBar();
-      if (sim.dist < 120) text('SPACE / UP / CLICK TO JUMP', W / 2, 30, '#fff', 8, 'center');
-    }
-  } else if (scene === 'cleared') {
+  if (scene === 'play') PLAY[chapterId].messages();
+  else if (scene === 'cleared') {
     panel(clearedChapter ? 'CHAPTER CLEARED!' : 'LEVEL CLEARED!', [clearedChapter ? chapterEndText() : 'GET READY FOR THE NEXT LEVEL', '', clearedChapter ? 'PRESS ENTER OR CLICK FOR THE MENU' : 'ENTER / CLICK: NEXT LEVEL   ESC: MENU'], '#a7f070');
   } else if (scene === 'over') {
     if (mode === 'endless') {

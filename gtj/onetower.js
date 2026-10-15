@@ -33,14 +33,14 @@ const OneTower = {
       waveTimer: D.firstWaveDelay,
       queue: [],              // enemy types of the current wave still to walk in
       spawnTimer: 0,
-      fireCd: 0,
+      boltRecharge: 0,        // s left of the Bolt's Ricarica before it can fire again
 
       // input: { aimX, aimY (field coordinates), fire }. Returns 'passed', 'lost' or null.
       update(dt, input) {
         if (sim.state !== 'running') return null;
-        sim.fireCd = Math.max(-dt, sim.fireCd - dt);   // may go slightly negative so the cadence does not drift
-        if (input.fire && sim.fireCd <= 0) {
-          sim.fireCd += 1 / B.fireRate;
+        sim.boltRecharge = Math.max(-dt, sim.boltRecharge - dt);   // may go slightly negative so the cadence does not drift
+        if (input.fire && sim.boltRecharge <= 0) {
+          sim.boltRecharge += 1 / B.fireRate;
           const t = sim.tower, dx = input.aimX - t.x, dy = input.aimY - t.y, d = Math.hypot(dx, dy) || 1;
           sim.bolts.push({ x: t.x, y: t.y, vx: dx / d * B.speed, vy: dy / d * B.speed });
           sim.fx.push({ type: 'shoot', x: t.x, y: t.y });
