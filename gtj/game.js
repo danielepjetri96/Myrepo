@@ -88,6 +88,7 @@ let endlessResult = null;           // { score, record, newRecord } after an end
 let controlsHint = 0;               // seconds left of the controls hint shown at the start of play
 let sim = null, deathTimer = 0, sceneTime = 0, shake = 0, gameOver = false;
 let upgradeOffer = [];              // the upgrades to choose from after a One Tower Defense level
+let sparks = [];                    // short-lived lines and rings drawn over the field (lightning, distant strikes, blasts, Frost)
 
 // Starts (or resumes, if a saved run exists) a chapter at its saved level.
 function startChapter(id) {
@@ -111,7 +112,7 @@ function startEndless(id) {
 // Common start of play, once sim is ready.
 function enterPlay() {
   controlsHint = 4;
-  particles = []; mouse.down = false;   // a button still held from the menu must not fire
+  particles = []; sparks = []; mouse.down = false;   // a button still held from the menu must not fire
   scene = 'play'; sceneTime = 0; gameOver = false;
 }
 const meters = dist => Math.floor(dist * JumpGuyData.endless.metersPerPx);
@@ -205,7 +206,7 @@ const PLAY = {
     level: n => OneTower.create({ waves: OneTower.buildWaves(OneTowerData.levels[n - 1]), spells: OneTower.levelSpells(n), upgrades: progression.run.upgrades }),
     update: updateTower, draw: drawField, hud: drawFieldHud, messages: drawFieldMessages, hideCursor: true,
     // after a level: 3 upgrades for the spells of the next one
-    offerUpgrades: () => OneTower.offerUpgrades({ spells: OneTower.levelSpells(progression.run.level), taken: progression.run.upgrades }),
+    offerUpgrades: () => OneTower.offerUpgrades({ spells: OneTower.levelSpells(progression.run.level + 1), taken: progression.run.upgrades }),
   },
 };
 
@@ -246,9 +247,6 @@ function updateRoom() {
   if (ev === 'room') { Sfx.select(); particles = []; return null; }
   return ev === 'lost' ? 'hit' : ev;
 }
-
-// Short-lived lines and rings drawn over the field (lightning, strikes from a distance, blasts, Frost).
-let sparks = [];
 
 function updateTower() {
   const key = [1, 2, 3, 4, 5].find(k => wasPressed('Digit' + k, 'Numpad' + k));
@@ -291,9 +289,14 @@ function update() {
           gameOver = !!(lost && lost.gameOver);
         }
       } else if (ev === 'passed') {
-        Sfx.win(); const passed = progression.levelPassed(); clearedChapter = !!(passed && passed.chapterCompleted); scene = 'cleared'; sceneTime = 0;
-        const offer = PLAY[chapterId].offerUpgrades;
-        if (mode === 'chapter' && !clearedChapter && offer) { upgradeOffer = offer(); if (upgradeOffer.length) scene = 'upgrade'; }
+        Sfx.win(); sceneTime = 0;
+        // Between levels some chapters offer an upgrade first: the level is saved as passed only once one is chosen,
+        // so leaving on that screen replays the level rather than losing the choice.
+        const run = progression.run, offer = PLAY[chapterId].offerUpgrades;
+        const lastLevel = run && run.level >= CHAPTERS.find(c => c.id === chapterId).levels;
+        upgradeOffer = run && offer && !lastLevel ? offer() : [];
+        if (upgradeOffer.length) scene = 'upgrade';
+        else { const passed = progression.levelPassed(); clearedChapter = !!(passed && passed.chapterCompleted); scene = 'cleared'; }
       }
     }
   } else if (scene === 'pause') {
@@ -312,7 +315,7 @@ function update() {
   } else if (scene === 'upgrade') {
     // one must be chosen (no way out): it belongs to the run from now on
     const k = sceneTime > 0.4 ? upgradeOffer.findIndex((id, i) => wasPressed('Digit' + (i + 1), 'Numpad' + (i + 1)) || hit(upgradeButton(i))) : -1;
-    if (k >= 0) { progression.addUpgrade(upgradeOffer[k]); Sfx.select(); beginLevel(); }
+    if (k >= 0) { progression.addUpgrade(upgradeOffer[k]); progression.levelPassed(); clearedChapter = false; Sfx.select(); beginLevel(); }
   } else if (scene === 'cleared') {
     if (sceneTime > 0.4 && (wasPressed('Enter', 'Space', 'Escape') || click)) {
       if (clearedChapter || wasPressed('Escape')) toMenu(); else beginLevel();

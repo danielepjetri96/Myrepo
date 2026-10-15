@@ -70,6 +70,7 @@ const OneTower = {
       stats: ST,              // spell and Torretta values with the upgrades applied (see stats)
       spells,                 // unlocked spells
       selected: 'bolt',
+      firing: false,          // the button was held at the previous step
       recharge: Object.fromEntries(OneTower.SPELLS.map(id => [id, 0])),   // s left of each spell's Ricarica
 
       get boss() { return sim.enemies.find(e => e.type === 'boss') || null; },
@@ -80,7 +81,9 @@ const OneTower = {
         const r = sim.recharge;
         for (const id in r) r[id] = Math.max(id === 'bolt' ? -dt : 0, r[id] - dt);   // the Bolt's may go slightly negative so its cadence does not drift
         if (input.select) sim.select(OneTower.SPELLS[input.select - 1]);
-        if (input.fire && r[sim.selected] <= 0) sim.cast(sim.selected, input.aimX, input.aimY);
+        const pressed = !!input.fire && !sim.firing;   // the button went down this step
+        sim.firing = !!input.fire;
+        if (input.fire && r[sim.selected] <= 0) sim.cast(sim.selected, input.aimX, input.aimY, pressed);
         sim.updateBolts(dt);
         sim.updateFireballs(dt);
         sim.updateMeteors(dt);
@@ -91,14 +94,15 @@ const OneTower = {
         return sim.updateWaves(dt);
       },
 
-      // Only an unlocked spell that is not recharging can be selected.
+      // Only an unlocked spell that is not recharging can be selected; the Bolt always can.
       select(id) {
-        if (spells.includes(id) && sim.recharge[id] <= 0) sim.selected = id;
+        if (spells.includes(id) && (id === 'bolt' || sim.recharge[id] <= 0)) sim.selected = id;
         else sim.fx.push({ type: 'deny', x: sim.tower.x, y: sim.tower.y });
       },
 
       // Casts a spell toward (x, y) and starts its Ricarica; after any spell but the Bolt the selection goes back to the Bolt.
-      cast(id, x, y) {
+      // pressed: the button has just gone down (a refusal is signalled only then, not while it is held).
+      cast(id, x, y, pressed) {
         const t = sim.tower;
         if (id === 'bolt') {
           sim.recharge.bolt += 1 / B.fireRate;
@@ -109,7 +113,7 @@ const OneTower = {
         }
         const S = SP[id];
         const strike = id === 'lightning' && sim.nearest(sim.active(), x, y);
-        if (id === 'lightning' && !strike) { sim.fx.push({ type: 'deny', x, y }); return; }   // nothing to strike: keep it
+        if (id === 'lightning' && !strike) { if (pressed) sim.fx.push({ type: 'deny', x, y }); return; }   // nothing to strike: keep it
         sim.recharge[id] = S.recharge;
         sim.selected = 'bolt';
         sim.fx.push({ type: 'cast', spell: id, x, y });
@@ -203,7 +207,7 @@ const OneTower = {
               e.summonT += e.summon.every;
               for (let k = 0; k < e.summon.count; k++) {
                 const a = k / e.summon.count * Math.PI * 2;
-                called.push([e.summon.type, e.x + Math.cos(a) * e.size, e.y + Math.sin(a) * e.size]);
+                called.push([e.summon.type, ...sim.awayFromTower(e.x + Math.cos(a) * e.size, e.y + Math.sin(a) * e.size, D.enemies[e.summon.type].size)]);
               }
               sim.fx.push({ type: 'summon', x: e.x, y: e.y });
             }
@@ -260,6 +264,16 @@ const OneTower = {
         else if ((r -= H) < W) { x = W - r; y = H; }
         else { x = 0; y = H - (r - W); }
         sim.addEnemy(id, x + m, y + m, D.spawnWarning);
+      },
+
+      // A point no closer to the Torretta than a small gap (for an enemy of the given size), pushed straight out from its centre.
+      awayFromTower(x, y, size) {
+        const t = sim.tower, min = (t.size + size) / 2 + 8;
+        let dx = x - t.x, dy = y - t.y;
+        if (!dx && !dy) dx = 1;
+        const axis = Math.max(Math.abs(dx), Math.abs(dy));
+        if (axis >= min) return [x, y];
+        return [t.x + dx * min / axis, t.y + dy * min / axis];
       },
 
       // Puts an enemy on the field; it blinks for spawnT seconds before it moves. Returns it.

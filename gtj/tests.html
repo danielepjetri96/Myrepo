@@ -1442,6 +1442,34 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     eq(passed >= total * 0.6, true, 'bot passed ' + passed + ' of ' + total + ' (per level ' + perLevel + ')');
     eq(perLevel[perLevel.length - 1] >= 1, true, 'the last level can be won (per level ' + perLevel + ')');
   });
+
+  // ---- review fixes ----
+  test('otd spells: the Bolt can be selected again right after a shot', () => {
+    const sim = arena();
+    step(sim, { aimX: 0, aimY: 0, fire: true });   // a shot: the Bolt's short Ricarica starts
+    press(sim, 2);
+    eq(sim.selected, 'fireball');
+    press(sim, 1);
+    eq(sim.selected, 'bolt');
+  });
+
+  test('otd spells: holding the button on Lightning with no target refuses once, not every step', () => {
+    const sim = arena();
+    press(sim, 4);
+    sim.fx.length = 0;
+    step(sim, { aimX: 50, aimY: 50, fire: true }, secs(1));
+    eq(fxCount(sim, 'deny'), 1);
+  });
+
+  test('otd boss: goblins it summons against the Torretta still appear away from it and walk in', () => {
+    const B = D.enemies.boss, sim = arena(), t = sim.tower;
+    sim.tower.hp = 1e6;
+    sim.addEnemy('boss', t.x + (t.size + B.size) / 2, t.y, 0);
+    step(sim, {}, secs(B.summon.every + 0.1));
+    const called = sim.enemies.filter(e => e.type === 'goblin');
+    eq(called.length, B.summon.count);
+    for (const g of called) eq(gapTo(t, g) > 4, true, 'gap ' + gapTo(t, g).toFixed(1));
+  });
 }
 
 // ---- report ----
