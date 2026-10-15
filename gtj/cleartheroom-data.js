@@ -55,6 +55,20 @@ const ClearTheRoomData = {
     },
   },
 
+  // Endless: room n eases from the `first` values to the `last` ones, reached at room `rampRooms` and kept from then on.
+  // A type joins at room `from` (its spawn weight given by `weight`). Health is not refilled between rooms.
+  endless: {
+    rampRooms: 20,
+    waves:   { first: 2,      last: 3 },
+    perWave: { first: [3, 4], last: [7, 9] },
+    types: {
+      grunt:    { from: 1,  weight: 3 },
+      runner:   { from: 3,  weight: 3 },
+      brute:    { from: 6,  weight: 2 },
+      splitter: { from: 10, weight: 2 },
+    },
+  },
+
   waveDelay: 1,         // s between a cleared wave and the next one
   spawnWarning: 0.6,    // s an enemy blinks at its spawn point before it becomes active
   splitWarning: 0.25,   // same, for the children of a splitter

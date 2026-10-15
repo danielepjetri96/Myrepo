@@ -976,6 +976,60 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     sim.boss.hp = 0;
     eq(step(sim, {}, secs(3)), 'passed');
   });
+
+  // ---- Endless ----
+  // Clears the current room and walks into the next one; returns what the run reported along the way.
+  const nextEndlessRoom = run => {
+    clearRoom(run);
+    const evs = [stepLevel(run, {}, 1)];
+    const door = doorCenter(run.sim.room);
+    run.sim.player.x = door.x; run.sim.player.y = door.y;
+    evs.push(stepLevel(run, {}, 2), stepLevel(run, {}, secs(1)));
+    return evs;
+  };
+
+  test('ctr endless: rooms never run out, and cleared rooms are counted', () => {
+    const run = ClearTheRoom.createEndless({ rng: seeded(4) });
+    eq(run.roomsCleared, 0);
+    for (let k = 1; k <= 25; k++) {
+      const evs = nextEndlessRoom(run);
+      eq(evs.includes('passed'), false, 'room ' + k + ' never passes the run');
+      eq(evs.includes('room'), true, 'room ' + k + ' leads to another room');
+      eq(run.roomsCleared, k);
+      eq(run.roomIndex, k);
+    }
+  });
+
+  test('ctr endless: difficulty grows room by room up to room 20, then holds', () => {
+    const r1 = ClearTheRoom.endlessRoom(1);
+    eq(r1.waves, 2); eq(r1.perWave, [3, 4]); eq(Object.keys(r1.types), ['grunt']);
+    const r20 = ClearTheRoom.endlessRoom(20);
+    eq(r20.waves, 3); eq(r20.perWave, [7, 9]);
+    eq(Object.keys(r20.types).sort(), ['brute', 'grunt', 'runner', 'splitter']);
+    for (let n = 2; n <= 40; n++) {
+      const a = ClearTheRoom.endlessRoom(n - 1), b = ClearTheRoom.endlessRoom(n);
+      eq(b.waves >= a.waves && b.perWave[0] >= a.perWave[0] && b.perWave[1] >= a.perWave[1], true, 'room ' + n + ' not easier');
+      eq(Object.keys(a.types).every(id => id in b.types), true, 'room ' + n + ' keeps every type');
+      eq(!!b.boss, false, 'no Boss');
+    }
+    eq(ClearTheRoom.endlessRoom(35), r20, 'holds after room 20');
+  });
+
+  test('ctr endless: enemy types join one at a time (runner at 3, brute at 6, splitter at 10)', () => {
+    const firstRoomWith = id => { for (let n = 1; n <= 40; n++) if (id in ClearTheRoom.endlessRoom(n).types) return n; };
+    eq(['grunt', 'runner', 'brute', 'splitter'].map(firstRoomWith), [1, 3, 6, 10]);
+  });
+
+  test('ctr endless: each room spawns waves at its own difficulty', () => {
+    const firstWave = run => { stepLevel(run, {}, secs(D.waveDelay + 0.1)); return run.sim.enemies.map(e => e.type); };
+    const run = ClearTheRoom.createEndless({ rng: seeded(7) });
+    const w1 = firstWave(run);
+    eq(w1.length >= 3 && w1.length <= 4, true, 'room 1 wave size ' + w1.length);
+    eq(w1.every(id => id === 'grunt'), true, 'room 1 only grunts');
+    for (let k = 1; k < 25; k++) nextEndlessRoom(run);
+    const w25 = firstWave(run);
+    eq(w25.length >= 7 && w25.length <= 9, true, 'room 25 wave size ' + w25.length);
+  });
 }
 
 // ---- report ----

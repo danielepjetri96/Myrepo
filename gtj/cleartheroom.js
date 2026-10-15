@@ -56,27 +56,61 @@ const ClearTheRoom = {
     return Array.from({ length: count(cfg.waves) }, () => Array.from({ length: count(cfg.perWave) }, pick));
   },
 
-  // A level: a chain of rooms, each picked at random (never the same layout twice in a row); with cfg.boss the last one is the Boss arena.
-  // Health carries over from room to room. Exposes the current room's room/player/enemies/bullets/fx.
-  // update returns 'passed', 'lost' or 'room' (just entered the next room); during the short transition it returns null.
+  // Index of a random layout, different from the previous one (when there is more than one).
+  pickLayout(rng, previous) {
+    const n = ClearTheRoomData.layouts.length;
+    let k;
+    do { k = Math.floor(rng() * n); } while (n > 1 && k === previous);
+    return k;
+  },
+
+  // A level: a chain of cfg.rooms rooms, each picked at random (never the same layout twice in a row); with cfg.boss the last one
+  // is the Boss arena. Clearing the last room reports 'passed'.
   createLevel({ cfg, rng }) {
     rng = rng || Math.random;
     const layouts = ClearTheRoomData.layouts, picks = [];
-    for (let r = 0; r < cfg.rooms; r++) {
-      let k;
-      do { k = Math.floor(rng() * layouts.length); } while (layouts.length > 1 && k === picks[r - 1]);
-      picks.push(k);
-    }
+    for (let r = 0; r < cfg.rooms; r++) picks.push(ClearTheRoom.pickLayout(rng, picks[r - 1]));
     const waves = picks.map(() => ClearTheRoom.buildWaves(cfg, rng));
     const isBoss = index => !!cfg.boss && index === cfg.rooms - 1;
     const make = (index, carry) => isBoss(index)
       ? ClearTheRoom.create({ layout: ClearTheRoomData.bossLayout, waves: [], boss: true, carry, rng })
       : ClearTheRoom.create({ layout: layouts[picks[index]], waves: waves[index], final: index === cfg.rooms - 1, carry, rng });
+    return Object.assign(ClearTheRoom.chain(make), { roomCount: cfg.rooms, layoutIndexes: picks });   // layoutIndexes: which layout each room uses
+  },
+
+  // Level config for room n (from 1) of the Endless, in the same shape as an entry of ClearTheRoomData.levels.
+  endlessRoom(n) {
+    const E = ClearTheRoomData.endless, t = Math.min(1, (n - 1) / (E.rampRooms - 1));
+    const ease = (a, b) => Math.round(a + (b - a) * t);
+    const types = {};
+    for (const id in E.types) if (n >= E.types[id].from) types[id] = E.types[id].weight;
+    return {
+      waves: ease(E.waves.first, E.waves.last),
+      perWave: [ease(E.perWave.first[0], E.perWave.last[0]), ease(E.perWave.first[1], E.perWave.last[1])],
+      types,
+    };
+  },
+
+  // Endless: rooms without end, harder and harder (see endlessRoom), each with a random layout (never the same twice in a row). Only 'room' and 'lost' are reported;
+  // roomsCleared is the score.
+  createEndless({ rng }) {
+    rng = rng || Math.random;
+    const layouts = ClearTheRoomData.layouts;
+    let last;
+    return ClearTheRoom.chain((index, carry) => {
+      last = ClearTheRoom.pickLayout(rng, last);
+      return ClearTheRoom.create({ layout: layouts[last], waves: ClearTheRoom.buildWaves(ClearTheRoom.endlessRoom(index + 1), rng), final: false, carry, rng });
+    });
+  },
+
+  // A chain of rooms built by make(index, carry), where carry is the player leaving the previous room.
+  // Health carries over from room to room. Exposes the current room's room/player/enemies/bullets/fx.
+  // update returns what the room reports ('passed', 'lost') or 'room' (just entered the next room); during the short transition it returns null.
+  chain(make) {
     const T = ClearTheRoom.ROOM_TRANSITION;
     const level = {
       roomIndex: 0,
-      roomCount: cfg.rooms,
-      layoutIndexes: picks,   // which layout each room uses
+      roomsCleared: 0,
       sim: make(0),
       transition: 0,   // s left of the change-of-room fade; the rooms are swapped halfway through
       get fade() { return level.transition > 0 ? 1 - Math.abs(level.transition - T / 2) / (T / 2) : 0; },
@@ -98,7 +132,9 @@ const ClearTheRoom = {
           }
           return null;
         }
+        const wasCleared = level.sim.cleared;
         const ev = level.sim.update(dt, input);
+        if (!wasCleared && level.sim.cleared) level.roomsCleared++;
         if (ev === 'exit') { level.transition = T; return 'room'; }
         return ev;
       },
