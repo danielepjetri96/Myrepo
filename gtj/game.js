@@ -432,6 +432,37 @@ function drawMagicBolt(x, y, vx, vy) {
   ctx.fillStyle = COLORS.white; ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 2);
 }
 
+// A Jump Guy obstacle filling exactly its box (x, y, w, h): low and wide ones are logs, tall ones fences,
+// the rest rocks or thorn bushes (seed picks which, so the same obstacle always looks the same).
+function drawObstacle(x, y, w, h, seed) {
+  if (h <= 10) {   // a log lying on the grass
+    ctx.fillStyle = COLORS.orange; ctx.fillRect(x, y + 1, w, h - 1);
+    ctx.fillStyle = COLORS.red; ctx.fillRect(x, y + h - 2, w, 2); for (let k = 4; k < w - 4; k += 7) ctx.fillRect(x + k, y + 3, 3, 1);
+    ctx.fillStyle = COLORS.yellow; ctx.fillRect(x + w - 4, y + 2, 3, h - 4);   // the cut end with its rings
+    ctx.fillStyle = COLORS.orange; ctx.fillRect(x + w - 3, y + 4, 1, h - 7);
+  } else if (h >= 20) {   // a fence post with its rails
+    ctx.fillStyle = COLORS.orange; ctx.fillRect(x + 2, y, 4, h); ctx.fillRect(x + w - 6, y, 4, h);
+    ctx.fillRect(x, y + 4, w, 3); ctx.fillRect(x, y + h - 9, w, 3);
+    ctx.fillStyle = COLORS.red; ctx.fillRect(x + 5, y, 1, h); ctx.fillRect(x + w - 3, y, 1, h);
+    ctx.fillStyle = COLORS.yellow; ctx.fillRect(x + 2, y, 4, 1); ctx.fillRect(x + w - 6, y, 4, 1);
+  } else if (hash(seed, 3) < 0.5) {   // a rock
+    for (let r = 0; r < h; r++) {
+      const inset = r < 3 ? 3 - r : 0;
+      ctx.fillStyle = r < 2 ? COLORS.silver : r > h - 3 ? COLORS.slate : COLORS.grey;
+      ctx.fillRect(x + inset, y + r, w - inset * 2, 1);
+    }
+    ctx.fillStyle = COLORS.silver; ctx.fillRect(x + 3, y + 3, 3, 2);
+    ctx.fillStyle = COLORS.slate; ctx.fillRect(x + w - 5, y + 5, 1, h - 7);
+  } else {   // a thorn bush
+    for (let r = 0; r < h; r++) {
+      const inset = r < 4 ? 4 - r : 0;
+      ctx.fillStyle = r < h / 2 ? COLORS.green : COLORS.teal; ctx.fillRect(x + inset, y + r, w - inset * 2, 1);
+    }
+    ctx.fillStyle = COLORS.white; for (const [dx, dy] of [[1, 5], [w - 2, 6], [w / 2, 0], [3, h - 4], [w - 4, h - 3]]) ctx.fillRect(x + Math.round(dx), y + dy, 1, 1);   // thorns
+    ctx.fillStyle = COLORS.red; ctx.fillRect(x + 4, y + 4, 2, 2); ctx.fillRect(x + w - 6, y + h - 6, 2, 2);   // berries
+  }
+}
+
 // The Mago's end: a puff of smoke growing and fading for 0.6 s, then only the hat is left on the ground.
 // (x, y): the top-left corner the Mago had; t: seconds since the hit.
 function drawMageDeath(x, y, t) {
@@ -447,7 +478,6 @@ function drawMageDeath(x, y, t) {
   if (t > 0.25) pixels(MAGE_HAT, MAGE_PAL, cx - 4, Math.round(y) + MAGE_H - MAGE_HAT.length);
 }
 
-const SPIKE = ['...#...', '..###..', '..###..', '.#####.', '.#####.', '#######', '#######'];
 const HEART = ['.rr.rr.', 'rrrrrrr', 'rrrrrrr', '.rrrrr.', '..rrr..', '...r...'];
 
 // A small deterministic noise in [0, 1) for scenery details that must not flicker from frame to frame.
@@ -532,31 +562,95 @@ function drawLevel() {
   }
   for (const o of sim.def.obstacles) {
     const ox = Math.round(o.x - sim.dist);
-    if (ox > -20 && ox < W) pixels(SPIKE, { '#': COLORS.orange }, ox, J.GROUND - o.h, 2);
+    if (ox > -o.w - 4 && ox < W) drawObstacle(ox, J.GROUND - o.h, o.w, o.h, o.x);
   }
   const mx = J.PLAYER_X + (J.PLAYER_W - MAGE_W) / 2, my = sim.y - MAGE_H;
   if (scene === 'dying') drawMageDeath(mx, my, sceneTime);
   else drawMage(mx, my, sim.grounded ? 'run' : sim.vy < 0 ? 'jump' : 'fall', sim.dist / 90);
 }
 
-// Enemy art: pixel rows drawn at 2x, centered on the enemy. Letter c is the body color, e the eyes (dark unless set).
-const ENEMY_ART = {
-  grunt: { c: COLORS.green, rows: ['.cccccc.', 'cccccccc', 'ceccccec', 'cccccccc', '.cccccc.', '.c.cc.c.'] },
-  runner: { c: COLORS.red, rows: ['.ccc.', 'ccccc', 'cecec', 'ccccc', '.c.c.'] },
-  brute: { c: COLORS.purple, rows: ['..ccccc..', '.ccccccc.', 'cceccccec', 'ccccccccc', 'ccccccccc', '.ccccccc.', '.cc.c.cc.', '.cc...cc.'] },
-  splitter: { c: COLORS.orange, rows: ['.cccc.', 'cccccc', 'ceccec', 'cccccc', '.cccc.', '.c..c.'] },
-  minirunner: { c: COLORS.orange, rows: ['.cc.', 'cccc', 'cecc', '.cc.'] },
-  boss: { c: COLORS.red, e: COLORS.yellow, rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccccccccccccc', 'ccceeccceeccc', 'ccceeccceeccc', 'ccccccccccccc', 'cccc.....cccc', 'ccccc...ccccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
+// Enemies as single-pixel art, two frames each (facing right), with the colors of their letters and how fast the
+// frames alternate. Clear the Room: the castle dungeon; One Tower Defense: the tower's courtyard (its Boss is otdboss).
+const CREATURES = {
+  grunt: {   // a skeleton
+    pal: { w: COLORS.white, s: COLORS.silver, e: COLORS.black }, fps: 4,
+    frames: [
+      ['...wwww...', '..wwwwww..', '..wewwew..', '..wwwwww..', '...wsws...', '....ww....', '..wwwwww..', '.w.wsws.w.', '.w.wsws.w.', '....ww....', '...wwww...', '...w..w...', '...w..w...', '..ww..ww..'],
+      ['...wwww...', '..wwwwww..', '..wewwew..', '..wwwwww..', '...wsws...', '....ww....', '..wwwwww..', 'w..wsws..w', 'w..wsws..w', '....ww....', '...wwww...', '...w..w...', '..w....w..', '.ww....ww.']],
+  },
+  runner: {   // a bat
+    pal: { p: COLORS.purple, b: COLORS.black, r: COLORS.red }, fps: 10,
+    frames: [
+      ['pp........pp', 'ppp......ppp', '.pppbbbbppp.', '..ppbrrbpp..', '....bbbb....', '.....bb.....'],
+      ['............', '....bbbb....', '..ppbrrbpp..', '.pppbbbbppp.', 'ppp......ppp', 'pp........pp']],
+  },
+  brute: {   // a stone golem
+    pal: { g: COLORS.grey, l: COLORS.silver, d: COLORS.slate, e: COLORS.cyan }, fps: 3,
+    frames: [
+      ['....gggggggg....', '...gllllllllg...', '...glgggggglg...', '...gleeggeelg...', '...gggggggggg...', '.gggggddddggggg.', 'gllggggggggggllg', 'glgggggggggggglg', 'gggg.gggggg.gggg', 'ggd..gggggg..dgg', 'gd...gddddg...dg', '.....gggggg.....', '.....ggddgg.....', '....ggg..ggg....', '....ggg..ggg....', '...dddd..dddd...'],
+      ['....gggggggg....', '...gllllllllg...', '...glgggggglg...', '...gleeggeelg...', '...gggggggggg...', '.gggggddddggggg.', 'gllggggggggggllg', 'glgggggggggggglg', 'gggg.gggggg.gggg', 'ggd..gggggg..dgg', 'gd...gddddg...dg', '.....gggggg.....', '.....ggddgg.....', '...ggg....ggg...', '...ggg....ggg...', '..dddd....dddd..']],
+  },
+  splitter: {   // a slime, splitting into little ones
+    pal: { l: COLORS.lime, g: COLORS.green, w: COLORS.white, e: COLORS.black }, fps: 4,
+    frames: [
+      ['............', '....llll....', '..llllllll..', '.lwwllllllg.', '.lwlelllelg.', 'lllllllllllg', 'lllllllllllg', 'gllllllllggg', '.gggggggggg.'],
+      ['............', '............', '...llllll...', '.llwwllllll.', 'llwlelllelgg', 'llllllllllgg', 'lllllllllllg', 'ggllllllllgg', 'gggggggggggg']],
+  },
+  minirunner: {   // a little slime
+    pal: { l: COLORS.lime, g: COLORS.green, e: COLORS.black }, fps: 6,
+    frames: [
+      ['..llll..', '.llllll.', 'llelelll', 'llllllll', 'gllllllg', '.gggggg.'],
+      ['........', '.llllll.', 'llelelll', 'llllllll', 'gllllllg', 'gggggggg']],
+  },
+  boss: {   // the dark knight
+    pal: { a: COLORS.slate, k: COLORS.black, s: COLORS.silver, r: COLORS.red, p: COLORS.purple, y: COLORS.yellow }, fps: 3,
+    frames: [
+      ['........kkkkkk........', '.......kaaaaaak.......', '......kaaaaaaaak......', '......kakkkkkkak......', '......karrkkrrak......', '......kakkkkkkak......', '.......kaaaaaak.......', '....kkkkaaaaaakkkk....', '...kaaaaaaaaaaaaaak...', '..kaaasaaaaaaaasaaak..', '..kaaasaayyaaasaaak.s.', '.pkaaaaaayyaaaaaakps..', '.ppkaaaaaaaaaaaakpps..', '.ppkkaaaaaaaaaakkpsp..', '.ppp.kaaaaaaaak.ppp...', '.ppp.kaaaaaaaak.ppp...', '.ppp.kaaakkaaak.ppp...', '.pp..kaak..kaak..pp...', '.....kaak..kaak.......', '.....kaak..kaak.......', '....kkkkk..kkkkk......', '....kkkkk..kkkkk......'],
+      ['........kkkkkk........', '.......kaaaaaak.......', '......kaaaaaaaak......', '......kakkkkkkak......', '......karrkkrrak......', '......kakkkkkkak......', '.......kaaaaaak.......', '....kkkkaaaaaakkkk....', '...kaaaaaaaaaaaaaak...', '..kaaasaaaaaaaasaaak..', '..kaaasaayyaaasaaak.s.', '.pkaaaaaayyaaaaaakps..', '.ppkaaaaaaaaaaaakpps..', '.ppkkaaaaaaaaaakkpsp..', '.ppp.kaaaaaaaak.ppp...', '.ppp.kaaaaaaaak.ppp...', '.ppp.kaaakkaaak.ppp...', '.pp..kaak..kaak..pp...', '....kaak....kaak......', '....kaak....kaak......', '...kkkkk....kkkkk.....', '...kkkkk....kkkkk.....']],
+  },
+  goblin: {   // a goblin with a spear
+    pal: { g: COLORS.green, d: COLORS.teal, e: COLORS.red, w: COLORS.orange, s: COLORS.silver }, fps: 5,
+    frames: [
+      ['..........s.', 'g..gggg..ws.', 'gggggggg.w..', '.ggeggeggw..', '.gggggggw...', '..gddddw....', '.ggddddgw...', '..gddddg.w..', '...g..g.....', '..gg..gg....'],
+      ['..........s.', 'g..gggg..ws.', 'gggggggg.w..', '.ggeggeggw..', '.gggggggw...', '..gddddw....', '.ggddddgw...', '..gddddg.w..', '...g..g.....', '...gg.gg....']],
+  },
+  wolf: {   // a grey wolf
+    pal: { g: COLORS.grey, l: COLORS.silver, e: COLORS.red, k: COLORS.black }, fps: 8,
+    frames: [
+      ['..........g.', '.........gg.', 'g.....gggegk', '.gggggggggg.', '.glllllllgg.', '.g.g...g.g..', 'g...g.g...g.'],
+      ['..........g.', '.........gg.', 'g.....gggegk', '.gggggggggg.', '.glllllllgg.', '..gg...gg...', '..g.g..g.g..']],
+  },
+  orc: {   // an orc in armour
+    pal: { t: COLORS.teal, a: COLORS.slate, w: COLORS.white, e: COLORS.yellow, k: COLORS.black }, fps: 3,
+    frames: [
+      ['....tttttt....', '...tttttttt...', '...tettttet...', '...tttttttt...', '...twttttwt...', '....tttttt....', '..aaaaaaaaaa..', '.taaaaaaaaaat.', 'tt.aaaaaaaa.tt', 't..aaaaaaaa..t', '...aaakkaaa...', '...aaa..aaa...', '...ttt..ttt...', '..kkkk..kkkk..'],
+      ['....tttttt....', '...tttttttt...', '...tettttet...', '...tttttttt...', '...twttttwt...', '....tttttt....', '..aaaaaaaaaa..', '.taaaaaaaaaat.', 'tt.aaaaaaaa.tt', 't..aaaaaaaa..t', '...aaakkaaa...', '..aaa....aaa..', '..ttt....ttt..', '.kkkk....kkkk.']],
+  },
+  shaman: {   // a goblin shaman with a skull staff
+    pal: { p: COLORS.purple, g: COLORS.green, e: COLORS.yellow, w: COLORS.orange, y: COLORS.white }, fps: 4,
+    frames: [
+      ['....pp.....y', '...pppp...yy', '..pppppp..w.', '..geggeg..w.', '..gggggg.w..', '.pppppppw...', 'pppppppp....', '.pppppp.....', '.pppppp.....', '.pp..pp.....'],
+      ['....pp.....y', '...pppp...yy', '..pppppp..w.', '..geggeg..w.', '..gggggg.w..', '.pppppppw...', 'pppppppp....', '.pppppp.....', '.pppppp.....', '..pp.pp.....']],
+  },
+  otdboss: {   // the goblin king
+    pal: { g: COLORS.green, d: COLORS.teal, y: COLORS.yellow, e: COLORS.red, w: COLORS.white, r: COLORS.red }, fps: 3,
+    frames: [
+      ['...y.y.y.y...', '...yyyyyyy...', '..ggggggggg..', '.gggeggggegg.', '.ggggggggggg.', 'g.gggwgwggg.g', '..ggggggggg..', '.rrgggggggrr.', 'rrrddddddddrr', 'rrrdddyddddrr', 'rr.ddddddd.rr', 'rr.ddddddd.rr', 'r..ddd.ddd..r', '...gg...gg...', '..ggg...ggg..'],
+      ['...y.y.y.y...', '...yyyyyyy...', '..ggggggggg..', '.gggeggggegg.', '.ggggggggggg.', 'g.gggwgwggg.g', '..ggggggggg..', '.rrgggggggrr.', 'rrrddddddddrr', 'rrrdddyddddrr', 'rr.ddddddd.rr', 'rr.ddddddd.rr', 'r..ddd.ddd..r', '..gg.....gg..', '.ggg.....ggg.']],
+  },
 };
 
-// One Tower Defense art: pixel rows drawn at 2x, centered on the enemy. Letter c is the body color, e the eyes.
-const FIELD_ART = {
-  goblin: { c: COLORS.green, rows: ['c......c', '.cccccc.', 'cceccecc', '.cccccc.', '..cccc..', '.cc..cc.'] },
-  wolf:   { c: COLORS.silver, rows: ['c.......', 'cc..cccc', '.ccccecc', '.cccccc.', '.c.c.c.c'] },
-  orc:    { c: COLORS.teal, rows: ['..ccccc..', '.ccccccc.', 'ccecccecc', 'ccccccccc', 'c.ccccc.c', '.ccccccc.', '.cc...cc.', '.cc...cc.'] },
-  shaman: { c: COLORS.purple, rows: ['..cc.y', '.cccc|', 'cecce|', '.cccc|', '.c..c|'] },
-  boss:   { c: COLORS.red, rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccceecccceecc', 'ccceecccceecc', 'ccccccccccccc', 'cccc.....cccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
-};
+// Draws a creature centered at (x, y). t: seconds (for its frames); flip: facing left; look: '' | 'flash' | 'slow'.
+function drawCreature(id, x, y, t, flip, look) {
+  const c = CREATURES[id], rows = c.frames[Math.floor(t * c.fps) % c.frames.length];
+  const one = col => Object.fromEntries(Object.keys(c.pal).map(k => [k, col]));
+  const pal = look === 'flash' ? one(COLORS.white) : look === 'slow' ? { ...one(COLORS.cyan), e: c.pal.e } : c.pal;
+  const x0 = Math.round(x - rows[0].length / 2), y0 = Math.round(y - rows.length / 2);
+  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) pixels(rows, one(COLORS.black), x0 + dx, y0 + dy, 1, flip);   // a dark outline
+  pixels(rows, pal, x0, y0, 1, flip);
+}
+
+
 
 function ring(x, y, r, color) { ctx.strokeStyle = color; ctx.beginPath(); ctx.arc(Math.round(x), Math.round(y), r, 0, Math.PI * 2); ctx.stroke(); }
 
@@ -565,7 +659,7 @@ function drawCourtyard() {
   ctx.fillStyle = COLORS.slate; ctx.fillRect(0, 0, W, H);
   for (let j = 0; j < H / 12; j++) for (let i = -1; i < W / 16 + 1; i++) {   // paving: offset rows of stones
     const x = i * 16 + (j % 2) * 8, y = j * 12;
-    ctx.fillStyle = hash(i, j) < 0.12 ? COLORS.grey : COLORS.slate; ctx.fillRect(x + 1, y + 1, 15, 11);   // mostly dark, so enemies stand out
+    ctx.fillStyle = hash(i, j) < 0.15 ? COLORS.slate : COLORS.grey; ctx.fillRect(x + 1, y + 1, 15, 11);   // light stones: the outlined enemies stand out
     ctx.fillStyle = COLORS.purple; ctx.fillRect(x, y, 16, 1); ctx.fillRect(x, y, 1, 12);
     if (hash(j, i) < 0.12) { ctx.fillStyle = COLORS.green; ctx.fillRect(x + 4, y + 10, 1, 2); ctx.fillRect(x + 6, y + 9, 1, 3); ctx.fillRect(x + 8, y + 10, 1, 2); }
   }
@@ -608,15 +702,13 @@ function drawField() {
   // Salute bar under the Torretta
   ctx.fillStyle = COLORS.black; ctx.fillRect(t.x - 16, t.y + t.size / 2 + 4, 32, 4);
   ctx.fillStyle = t.hp > t.maxHp * 0.3 ? COLORS.lime : COLORS.red; ctx.fillRect(t.x - 15, t.y + t.size / 2 + 5, Math.round(30 * Math.max(0, t.hp) / t.maxHp), 2);
-  for (const e of sim.enemies) {
-    const art = FIELD_ART[e.type], w = art.rows[0].length * 2, h = art.rows.length * 2;
-    const x = Math.round(e.x - w / 2), y = Math.round(e.y - h / 2);
+  for (const e of sim.enemies) {   // they face the Torretta they walk to
     if (e.spawnT > 0) {
-      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = COLORS.yellow; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
+      const half = e.size / 2 + 2;
+      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = COLORS.yellow; ctx.strokeRect(Math.round(e.x - half) + 0.5, Math.round(e.y - half) + 0.5, half * 2 - 1, half * 2 - 1); }
       continue;
     }
-    const body = e.flash > 0 ? COLORS.white : e.slowT > 0 ? COLORS.cyan : art.c;   // white when hit, icy while slowed
-    pixels(art.rows, { c: body, e: e.flash > 0 ? COLORS.white : COLORS.red, y: COLORS.yellow, '|': COLORS.grey }, x, y, 2);
+    drawCreature(e.type === 'boss' ? 'otdboss' : e.type, e.x, e.y, sceneTime + e.size * 0.13, t.x < e.x, e.flash > 0 ? 'flash' : e.slowT > 0 ? 'slow' : '');
   }
   for (const b of sim.bolts) drawMagicBolt(b.x, b.y, b.vx, b.vy);
   for (const f of sim.fireballs) { ctx.fillStyle = COLORS.orange; ctx.fillRect(Math.round(f.x - 3), Math.round(f.y - 3), 6, 6); ctx.fillStyle = COLORS.yellow; ctx.fillRect(Math.round(f.x - 1), Math.round(f.y - 1), 2, 2); }
@@ -696,21 +788,20 @@ function drawRoom() {
     if (!(r.solid[j] && r.solid[j][i]) || r.inDoor(i * T + 1, j * T + 1) || !(r.solid[j + 1] && r.solid[j + 1][i] === false) || hash(i, j) > 0.22) continue;
     drawTorch(Math.round(i * T - cam.x) + T / 2, Math.round(j * T - cam.y) + T - 6, i + j);
   }
-  // enemies (blinking outline while they spawn)
+  // enemies (blinking outline while they spawn), facing the Mago
+  const p = sim.player;
   for (const e of sim.enemies) {
-    const art = ENEMY_ART[e.type] || ENEMY_ART.grunt, w = art.rows[0].length * 2, h = art.rows.length * 2;
-    const x = Math.round(e.x - cam.x - w / 2), y = Math.round(e.y - cam.y - h / 2);
+    const x = e.x - cam.x, y = e.y - cam.y, half = e.size / 2 + 2;
     if (e.spawnT > 0) {
-      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = COLORS.lime; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
+      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = COLORS.lime; ctx.strokeRect(Math.round(x - half) + 0.5, Math.round(y - half) + 0.5, half * 2 - 1, half * 2 - 1); }
       continue;
     }
     const warning = e.state === 'warning' && Math.floor(e.timer * 12) % 2;   // the Boss blinks before it charges
-    pixels(art.rows, e.flash > 0 || warning ? { c: COLORS.white, e: COLORS.white } : { c: art.c, e: art.e || COLORS.black }, x, y, 2);
+    drawCreature(e.type, x, y, sceneTime + e.size * 0.13, p.x < e.x, e.flash > 0 || warning ? 'flash' : '');
   }
   for (const h of sim.pickups) pixels(HEART, { r: COLORS.red }, Math.round(h.x - cam.x - 3.5), Math.round(h.y - cam.y - 3), 1);
   for (const b of sim.bullets) drawMagicBolt(b.x - cam.x, b.y - cam.y, b.vx, b.vy);
   // player (blinks while invulnerable)
-  const p = sim.player;
   const mx = p.x - cam.x - MAGE_W / 2, my = p.y - cam.y + p.size / 2 + 2 - MAGE_H;   // feet just under the hitbox
   if (scene === 'dying') drawMageDeath(mx, my, sceneTime);
   else if (!(p.invuln > 0 && Math.floor(p.invuln * 15) % 2)) {   // blinks while invulnerable
