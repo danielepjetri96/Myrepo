@@ -85,7 +85,9 @@ let endlessResult = null;           // { score, record, newRecord } after an end
 let controlsHint = 0;               // seconds left of the controls hint shown at the start of play
 let sim = null, deathTimer = 0, sceneTime = 0, shake = 0, gameOver = false;
 let upgradeChoice = null;           // the upgrade on offer, after a level or mid-Endless (see upgradeChoiceOf)
-let sparks = [];                    // short-lived lines and rings drawn over the field (lightning, distant strikes, blasts, Frost)
+let sparks = [];
+let mageTrail = { x: 0, y: 0 };      // where the Mago was last drawn in Clear the Room (to tell walking from standing)
+let mageCastT = 0;                  // seconds left of the Mago's casting pose in One Tower Defense                    // short-lived lines and rings drawn over the field (lightning, distant strikes, blasts, Frost)
 
 // Starts (or resumes, if a saved run exists) a chapter at its saved level.
 function startChapter(id) {
@@ -231,7 +233,9 @@ const PLAY = {
 
 // Plays the sounds and particles queued by the simulation, then ages the controls hint and the particles.
 function playFx() {
+  mageCastT = Math.max(0, mageCastT - DT);
   for (const f of sim.fx) {
+    if (f.type === 'shoot' || f.type === 'cast') mageCastT = 0.2;
     if (f.type === 'shoot') Sfx.shoot();
     else if (f.type === 'hit') { Sfx.enemyHit(); burst(f.x, f.y, COLORS.lime, 3); }
     else if (f.type === 'kill') { Sfx.kill(); burst(f.x, f.y, COLORS.lime, 10); }
@@ -364,28 +368,85 @@ function withAlpha(hex, a) {
   const n = parseInt(hex.slice(1), 16);
   return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
 }
-function pixels(rows, pal, x, y, s) {
+// Draws pixel rows (one character per pixel, colors from pal) at scale s; flip mirrors them left to right.
+function pixels(rows, pal, x, y, s, flip) {
   s = s || 1;
   rows.forEach((row, j) => [...row].forEach((ch, i) => {
     if (!pal[ch]) return;
-    ctx.fillStyle = pal[ch]; ctx.fillRect(Math.round(x) + i * s, Math.round(y) + j * s, s, s);
+    const col = flip ? row.length - 1 - i : i;
+    ctx.fillStyle = pal[ch]; ctx.fillRect(Math.round(x) + col * s, Math.round(y) + j * s, s, s);
   }));
 }
 
-const RUNNER = [
-  '..hhhh..',
-  '.hhhhhh.',
-  '.sssssss',
-  '.sess.s.',
-  '..ssss..',
-  '.bbbbbb.',
-  'sbbbbbbs',
-  '.bbbbbb.',
-  '.bb..bb.',
-  '.dd..dd.',
+// The Mago, the protagonist of the three chapters: 12 x 18 px, facing right (mirrored to face left).
+// h hat, H hat shade, s skin, e eye, r robe, R robe shade, w staff, o staff orb, b boots.
+const MAGE_W = 12, MAGE_H = 18;
+const MAGE_TOP = [
+  '.....hh.....',
+  '....hhH.....',
+  '....hhhH....',
+  '...hhhhH....',
+  '.hhhhhhhhhh.',
+  '...sssss..o.',
+  '...sssesoooo',
+  '...sssss..o.',
+  '..rrrrrrr.w.',
+  '.rrrrrrrssw.',
+  '.rrrrrrr..w.',
+  '.rrrrrrr..w.',
+  '.RrrrrrR..w.',
+  '.RRRRRRR..w.',
 ];
-const RUNNER2 = RUNNER.slice(0, 8).concat(['..bb.bb.', '..dd.dd.']);
-const PAL = { h: COLORS.red, s: COLORS.yellow, e: COLORS.black, b: COLORS.blue, d: COLORS.slate };
+// legs and the bottom of the staff, 4 rows under MAGE_TOP
+const MAGE_LEGS = {
+  stand: ['..bb.bb...w.', '..bb.bb...w.', '..bb.bb...w.', '.bbb.bbb....'],
+  run0:  ['..bb..bb..w.', '.bb....bb.w.', 'bb......b.w.', 'b.......bb..'],
+  run1:  ['..bbbb....w.', '..bb.bb...w.', '..bb..b...w.', '.bb...bb....'],
+  run2:  ['...bbb....w.', '...bbb....w.', '...bb.....w.', '..bbb.......'],
+  run3:  ['..bbbb....w.', '.bb..bb...w.', '.b...bb...w.', 'bb....b.....'],
+  jump:  ['.bbbbbb...w.', '..bb.bb...w.', '...b..b...w.', '............'],
+  fall:  ['..bb.bb...w.', '.bb...bb..w.', '.b.....b..w.', '............'],
+};
+const MAGE_PAL = { h: COLORS.red, H: COLORS.purple, s: COLORS.yellow, e: COLORS.black, r: COLORS.blue, R: COLORS.navy,
+  w: COLORS.orange, o: COLORS.cyan, b: COLORS.black };
+const MAGE_HAT = ['....hh', '..hhhH', 'hhhhhhhh'];
+
+// Draws the Mago with its top-left corner at (x, y). pose: idle | run | jump | fall | cast; t: seconds, for animation.
+function drawMage(x, y, pose, t, flip) {
+  const legs = pose === 'run' ? MAGE_LEGS['run' + (Math.floor(t * 10) % 4)] : MAGE_LEGS[pose] || MAGE_LEGS.stand;
+  const pal = pose === 'cast' ? { ...MAGE_PAL, o: COLORS.white }   // the orb flares while casting
+    : pose === 'idle' && Math.floor(t * 2) % 2 ? { ...MAGE_PAL, o: COLORS.sky } : MAGE_PAL;   // and pulses at rest
+  pixels(MAGE_TOP.concat(legs), pal, x, y, 1, flip);
+  if (pose === 'cast') {   // a few sparks around the orb
+    ctx.fillStyle = COLORS.yellow;
+    const ox = Math.round(x) + (flip ? 1 : 10), oy = Math.round(y) + 6;
+    for (const [dx, dy] of [[-2, -2], [2, -2], [0, -3], [3, 1]]) ctx.fillRect(ox + (flip ? -dx : dx), oy + dy, 1, 1);
+  }
+}
+
+// A magic bolt from the Mago's staff: a bright core with a short trail behind it.
+function drawMagicBolt(x, y, vx, vy) {
+  const d = Math.hypot(vx, vy) || 1, tx = -vx / d, ty = -vy / d;
+  ctx.fillStyle = COLORS.sky; ctx.fillRect(Math.round(x + tx * 4) - 1, Math.round(y + ty * 4) - 1, 2, 2);
+  ctx.fillStyle = COLORS.cyan; ctx.fillRect(Math.round(x) - 2, Math.round(y) - 2, 4, 4);
+  ctx.fillStyle = COLORS.white; ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 2);
+}
+
+// The Mago's end: a puff of smoke growing and fading for 0.6 s, then only the hat is left on the ground.
+// (x, y): the top-left corner the Mago had; t: seconds since the hit.
+function drawMageDeath(x, y, t) {
+  const cx = Math.round(x) + MAGE_W / 2, cy = Math.round(y) + MAGE_H / 2;
+  if (t < 0.6) {
+    const k = t / 0.6, r = 3 + k * 9;
+    ctx.fillStyle = withAlpha(k < 0.5 ? COLORS.silver : COLORS.grey, 1 - k);
+    for (let a = 0; a < 6; a++) {
+      const px = cx + Math.cos(a * 1.05 + k * 2) * r * 0.6, py = cy + Math.sin(a * 1.05 + k * 2) * r * 0.5;
+      ctx.beginPath(); ctx.arc(Math.round(px), Math.round(py), Math.max(1, r * 0.45), 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  if (t > 0.25) pixels(MAGE_HAT, MAGE_PAL, cx - 4, Math.round(y) + MAGE_H - MAGE_HAT.length);
+}
+
 const SPIKE = ['...#...', '..###..', '..###..', '.#####.', '.#####.', '#######', '#######'];
 const HEART = ['.rr.rr.', 'rrrrrrr', 'rrrrrrr', '.rrrrr.', '..rrr..', '...r...'];
 
@@ -432,11 +493,9 @@ function drawLevel() {
     const ox = Math.round(o.x - sim.dist);
     if (ox > -20 && ox < W) pixels(SPIKE, { '#': COLORS.orange }, ox, J.GROUND - o.h, 2);
   }
-  const flashHidden = scene === 'dying' && Math.floor(sceneTime * 20) % 2 === 1;
-  if (!flashHidden) {
-    const frame = sim.grounded && Math.floor(sim.dist / 8) % 2 ? RUNNER2 : RUNNER;
-    pixels(frame, PAL, J.PLAYER_X, sim.y - J.PLAYER_H, 2);
-  }
+  const mx = J.PLAYER_X + (J.PLAYER_W - MAGE_W) / 2, my = sim.y - MAGE_H;
+  if (scene === 'dying') drawMageDeath(mx, my, sceneTime);
+  else drawMage(mx, my, sim.grounded ? 'run' : sim.vy < 0 ? 'jump' : 'fall', sim.dist / 90);
 }
 
 // Enemy art: pixel rows drawn at 2x, centered on the enemy. Letter c is the body color, e the eyes (dark unless set).
@@ -448,16 +507,6 @@ const ENEMY_ART = {
   minirunner: { c: COLORS.orange, rows: ['.cc.', 'cccc', 'cecc', '.cc.'] },
   boss: { c: COLORS.red, e: COLORS.yellow, rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccccccccccccc', 'ccceeccceeccc', 'ccceeccceeccc', 'ccccccccccccc', 'cccc.....cccc', 'ccccc...ccccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
 };
-const HERO = [
-  '..hhhh..',
-  '.hssssh.',
-  '.sesses.',
-  '..ssss..',
-  '.bbbbbb.',
-  'sbbbbbbs',
-  '.bb..bb.',
-  '.dd..dd.',
-];
 
 const TOWER = [
   '....bb....',
@@ -492,6 +541,9 @@ function drawField() {
   const t = sim.tower;
   ctx.fillStyle = COLORS.grey; ctx.fillRect(t.x - t.size / 2 - 2, t.y - t.size / 2 - 2, t.size + 4, t.size + 4);   // the ground the enemies stop at
   pixels(TOWER, { b: COLORS.blue, w: COLORS.silver, g: COLORS.black, d: COLORS.red }, Math.round(t.x - 15), Math.round(t.y - 22), 3);
+  const mx = t.x - MAGE_W / 2, my = t.y - 13 - MAGE_H;   // standing on the battlements
+  if (scene === 'dying') drawMageDeath(mx, my, sceneTime);
+  else drawMage(mx, my, mageCastT > 0 ? 'cast' : 'idle', sceneTime, mouse.x < t.x);
   // Salute bar under the Torretta
   ctx.fillStyle = COLORS.black; ctx.fillRect(t.x - 16, t.y + t.size / 2 + 4, 32, 4);
   ctx.fillStyle = t.hp > t.maxHp * 0.3 ? COLORS.lime : COLORS.red; ctx.fillRect(t.x - 15, t.y + t.size / 2 + 5, Math.round(30 * Math.max(0, t.hp) / t.maxHp), 2);
@@ -505,7 +557,7 @@ function drawField() {
     const body = e.flash > 0 ? COLORS.white : e.slowT > 0 ? COLORS.cyan : art.c;   // white when hit, icy while slowed
     pixels(art.rows, { c: body, e: e.flash > 0 ? COLORS.white : COLORS.red, y: COLORS.yellow, '|': COLORS.grey }, x, y, 2);
   }
-  for (const b of sim.bolts) { ctx.fillStyle = COLORS.cyan; ctx.fillRect(Math.round(b.x - 1.5), Math.round(b.y - 1.5), 3, 3); }
+  for (const b of sim.bolts) drawMagicBolt(b.x, b.y, b.vx, b.vy);
   for (const f of sim.fireballs) { ctx.fillStyle = COLORS.orange; ctx.fillRect(Math.round(f.x - 3), Math.round(f.y - 3), 6, 6); ctx.fillStyle = COLORS.yellow; ctx.fillRect(Math.round(f.x - 1), Math.round(f.y - 1), 2, 2); }
   for (const k of sparks) {
     if (k.ring) { ring(k.x, k.y, k.r, k.color); continue; }
@@ -565,10 +617,16 @@ function drawRoom() {
     pixels(art.rows, e.flash > 0 || warning ? { c: COLORS.white, e: COLORS.white } : { c: art.c, e: art.e || COLORS.black }, x, y, 2);
   }
   for (const h of sim.pickups) pixels(HEART, { r: COLORS.red }, Math.round(h.x - cam.x - 3.5), Math.round(h.y - cam.y - 3), 1);
-  for (const b of sim.bullets) { ctx.fillStyle = COLORS.yellow; ctx.fillRect(Math.round(b.x - cam.x - 1.5), Math.round(b.y - cam.y - 1.5), 3, 3); }
+  for (const b of sim.bullets) drawMagicBolt(b.x - cam.x, b.y - cam.y, b.vx, b.vy);
   // player (blinks while invulnerable)
   const p = sim.player;
-  if (!(p.invuln > 0 && Math.floor(p.invuln * 15) % 2)) pixels(HERO, PAL, Math.round(p.x - cam.x - 8), Math.round(p.y - cam.y - 8), 2);
+  const mx = p.x - cam.x - MAGE_W / 2, my = p.y - cam.y + p.size / 2 + 2 - MAGE_H;   // feet just under the hitbox
+  if (scene === 'dying') drawMageDeath(mx, my, sceneTime);
+  else if (!(p.invuln > 0 && Math.floor(p.invuln * 15) % 2)) {   // blinks while invulnerable
+    const moving = Math.hypot(p.x - mageTrail.x, p.y - mageTrail.y) > 0.05;
+    drawMage(mx, my, mouse.down && scene === 'play' ? 'cast' : moving ? 'run' : 'idle', sceneTime * 0.8, p.dirX < 0);
+  }
+  mageTrail = { x: p.x, y: p.y };
   for (const q of particles) { ctx.fillStyle = q.color; ctx.fillRect(Math.round(q.x - cam.x), Math.round(q.y - cam.y), 2, 2); }
   // crosshair at the mouse position
   if (scene === 'play') {
