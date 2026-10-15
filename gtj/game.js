@@ -102,30 +102,36 @@ function beginLevel() {
   particles = []; mouse.down = false;   // a button still held from the menu must not fire
   scene = 'play'; sceneTime = 0; gameOver = false;
 }
-function startEndless() {
-  chapterId = 'jumpguy'; mode = 'endless'; endlessResult = null;
-  sim = JumpGuy.create(JumpGuy.buildEndless());
+function startEndless(id) {
+  chapterId = id; mode = 'endless'; endlessResult = null;
+  if (id === 'cleartheroom') { sim = ClearTheRoom.createEndless({}); roomHelp = 4; }
+  else sim = JumpGuy.create(JumpGuy.buildEndless());
+  particles = []; mouse.down = false;
   scene = 'play'; sceneTime = 0; gameOver = false;
 }
 const meters = dist => Math.floor(dist * JumpGuyData.endless.metersPerPx);
+// Endless score of the run in progress, and how it reads: metres run in Jump Guy, rooms cleared in Clear the Room.
+const endlessScore = () => chapterId === 'cleartheroom' ? sim.roomsCleared : meters(sim.dist);
+const ENDLESS_UNIT = { jumpguy: ' M', cleartheroom: ' ROOMS' };
 function toMenu() { scene = 'menu'; sceneTime = 0; }
 
 // ---- menu ----
-// Menu rows: the three chapters, with Jump Guy's Endless right after Jump Guy.
+// Menu rows: the three chapters, each playable chapter followed by its Endless.
 const MENU = [
   { kind: 'chapter', i: 0 },
   { kind: 'endless', id: 'jumpguy', name: 'JUMP GUY ENDLESS', indent: 12 },
   { kind: 'chapter', i: 1 },
+  { kind: 'endless', id: 'cleartheroom', name: 'CLEAR THE ROOM ENDLESS', indent: 12 },
   { kind: 'chapter', i: 2 },
 ];
-const CARD = i => ({ x: 40, y: 50 + i * 28, w: 240, h: 24 });
+const CARD = i => ({ x: 40, y: 46 + i * 23, w: 240, h: 22 });
 const inRect = (p, r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
 
 function activateItem(i) {
   const item = MENU[i];
   if (item.kind === 'endless') {
     if (!progression.isEndlessUnlocked(item.id)) { Sfx.deny(); return; }
-    Sfx.select(); startEndless(); return;
+    Sfx.select(); startEndless(item.id); return;
   }
   const c = CHAPTERS[item.i];
   if (!progression.isChapterUnlocked(c.id) || !PLAYABLE[c.id]) { Sfx.deny(); return; }
@@ -227,9 +233,9 @@ function update() {
       if (ev === 'hit') {
         Sfx.hit(); shake = 0.3; deathTimer = 0.9; scene = 'dying'; sceneTime = 0;
         if (mode === 'endless') {
-          const score = meters(sim.dist);
-          const newRecord = progression.submitEndless('jumpguy', score);
-          endlessResult = { score, record: progression.record('jumpguy'), newRecord };
+          const score = endlessScore();
+          const newRecord = progression.submitEndless(chapterId, score);
+          endlessResult = { score, record: progression.record(chapterId), newRecord };
           gameOver = true;
         } else {
           hud.lives = Math.max(0, hud.lives - 1);
@@ -258,7 +264,7 @@ function update() {
       if (clearedChapter || wasPressed('Escape')) toMenu(); else beginLevel();
     }
   } else if (scene === 'over') {
-    if (sceneTime > 0.4 && (wasPressed('Enter', 'Space') || click)) { if (mode === 'endless') startEndless(); else startChapter(chapterId); }
+    if (sceneTime > 0.4 && (wasPressed('Enter', 'Space') || click)) { if (mode === 'endless') startEndless(chapterId); else startChapter(chapterId); }
     else if (wasPressed('Escape')) toMenu();
   }
   pressedKeys.clear(); click = null;
@@ -415,14 +421,17 @@ function drawRoom() {
 }
 
 function drawLives() {
+  if (chapterId === 'cleartheroom') {
+    for (let i = 0; i < sim.player.maxHp; i++) pixels(HEART, { r: i < sim.player.hp ? '#ef4444' : '#333c57' }, 6 + i * 10, 5);
+  }
   if (mode === 'endless') {
-    text('ONE LIFE', 6, 6, '#fff', 8);
-    text(meters(sim.dist) + ' M', W - 6, 6, '#fff', 8, 'right');
-    text('BEST ' + progression.record('jumpguy') + ' M', W - 6, 18, '#ffcd75', 8, 'right');
+    const unit = ENDLESS_UNIT[chapterId];
+    text('ONE LIFE', 6, chapterId === 'cleartheroom' ? 16 : 6, '#fff', 8);
+    text(endlessScore() + unit, W - 6, 6, '#fff', 8, 'right');
+    text('BEST ' + progression.record(chapterId) + unit, W - 6, 18, '#ffcd75', 8, 'right');
     return;
   }
   if (chapterId === 'cleartheroom') {
-    for (let i = 0; i < sim.player.maxHp; i++) pixels(HEART, { r: i < sim.player.hp ? '#ef4444' : '#333c57' }, 6 + i * 10, 5);
     text('LIVES ' + hud.lives, 6, 16, '#fff', 8);
     if (sim.boss) drawBossBar(sim.boss);
     else text('ROOM ' + (sim.roomIndex + 1) + '/' + sim.roomCount, W / 2, 6, '#fff', 8, 'center');
@@ -471,7 +480,7 @@ function drawMenu() {
     if (item.kind === 'endless') {
       unlocked = progression.isEndlessUnlocked(item.id);
       title = item.name;
-      sub = unlocked ? 'BEST: ' + progression.record(item.id) + ' M' : 'LOCKED - COMPLETE JUMP GUY';
+      sub = unlocked ? 'BEST: ' + progression.record(item.id) + ENDLESS_UNIT[item.id] : 'LOCKED - COMPLETE ' + CHAPTERS.find(c => c.id === item.id).name;
     } else {
       const c = CHAPTERS[item.i];
       unlocked = progression.isChapterUnlocked(c.id);
@@ -528,7 +537,8 @@ function draw() {
   } else if (scene === 'over') {
     if (mode === 'endless') {
       const r = endlessResult;
-      panel(r.newRecord ? 'NEW RECORD!' : 'GAME OVER', ['DISTANCE: ' + r.score + ' M', r.newRecord ? 'BEST BEATEN' : 'BEST: ' + r.record + ' M', '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], r.newRecord ? '#ffcd75' : '#ef4444');
+      const unit = ENDLESS_UNIT[chapterId], result = chapterId === 'cleartheroom' ? 'ROOMS CLEARED: ' + r.score : 'DISTANCE: ' + r.score + unit;
+      panel(r.newRecord ? 'NEW RECORD!' : 'GAME OVER', [result, r.newRecord ? 'BEST BEATEN' : 'BEST: ' + r.record + unit, '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], r.newRecord ? '#ffcd75' : '#ef4444');
     } else {
       panel('GAME OVER', ['NO LIVES LEFT', 'YOU RESTART FROM LEVEL 1', '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], '#ef4444');
     }
