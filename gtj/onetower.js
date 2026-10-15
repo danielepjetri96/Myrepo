@@ -4,7 +4,7 @@
 const OneTower = {
   W: 320,
   H: 180,
-  SPELLS: ['bolt', 'fireball', 'frost', 'lightning', 'meteor'],   // keys 1-5
+  SPELLS: Object.keys(OneTowerData.spells),   // keys 1-5, in the order of the data
 
   // Lists the enemy types of each wave for a level config ({ waves, perWave: [min, max], types: { id: weight }, boss }).
   buildWaves(cfg, rng) {
@@ -51,15 +51,15 @@ const OneTower = {
 
   // waves: lists of enemy types, one list per wave (see buildWaves). spells: the unlocked spells; upgrades: the ones taken.
   create({ waves, spells = ['bolt'], upgrades = [], rng }) {
-    const D = OneTowerData, ST = OneTower.stats(upgrades), SP = ST.spells, B = SP.bolt;
+    const D = OneTowerData, stats = OneTower.stats(upgrades), spellStats = stats.spells, B = spellStats.bolt;
     rng = rng || Math.random;
     const sim = {
-      tower: { x: OneTower.W / 2, y: OneTower.H / 2, size: ST.tower.size, hp: ST.tower.hp, maxHp: ST.tower.hp },
+      tower: { x: OneTower.W / 2, y: OneTower.H / 2, size: stats.tower.size, hp: stats.tower.hp, maxHp: stats.tower.hp },
       enemies: [],
       bolts: [],
       fireballs: [],          // { x, y, vx, vy, left: px to the click point }
       meteors: [],            // { x, y, t: s left before it falls }
-      fires: [],              // burning ground left by a Fireball: { x, y, radius, ticks: hits left, t: s to the next }
+      fires: [],              // burning ground left by a Fireball: { x, y, radius, clock (see everySecond) }
       fx: [],                 // { type: 'shoot' | 'cast' | 'deny' | 'blast' | 'hit' | 'kill' | 'hurt', x, y, ... }
       state: 'running',       // running | lost | passed
       waveIndex: 0,           // waves started so far
@@ -67,7 +67,7 @@ const OneTower = {
       waveTimer: D.firstWaveDelay,
       queue: [],              // enemy types of the current wave still to walk in
       spawnTimer: 0,
-      stats: ST,              // spell and Torretta values with the upgrades applied (see stats)
+      stats,                  // spell and Torretta values with the upgrades applied (see stats)
       spells,                 // unlocked spells
       selected: 'bolt',
       firing: false,          // the button was held at the previous step
@@ -103,38 +103,66 @@ const OneTower = {
       // Casts a spell toward (x, y) and starts its Ricarica; after any spell but the Bolt the selection goes back to the Bolt.
       // pressed: the button has just gone down (a refusal is signalled only then, not while it is held).
       cast(id, x, y, pressed) {
-        const t = sim.tower;
-        if (id === 'bolt') {
+        if (id === 'bolt') {   // the Bolt keeps a steady cadence instead of a full Ricarica
           sim.recharge.bolt += 1 / B.fireRate;
-          const dx = x - t.x, dy = y - t.y, d = Math.hypot(dx, dy) || 1;
-          sim.bolts.push({ x: t.x, y: t.y, vx: dx / d * B.speed, vy: dy / d * B.speed, struck: [] });
-          sim.fx.push({ type: 'shoot', x: t.x, y: t.y });
+          sim.effects.bolt(B, x, y);
           return;
         }
-        const S = SP[id];
-        const strike = id === 'lightning' && sim.nearest(sim.active(), x, y);
-        if (id === 'lightning' && !strike) { if (pressed) sim.fx.push({ type: 'deny', x, y }); return; }   // nothing to strike: keep it
+        const S = spellStats[id];
+        if (sim.effects[id](S, x, y) === false) { if (pressed) sim.fx.push({ type: 'deny', x, y }); return; }   // nothing to cast on: keep it
         sim.recharge[id] = S.recharge;
         sim.selected = 'bolt';
         sim.fx.push({ type: 'cast', spell: id, x, y });
-        if (id === 'lightning') {
-          // each jump goes to the closest enemy not struck yet, if within reach
-          const struck = [strike];
+      },
+
+      // What each spell does when cast toward (x, y) with its values S. Returning false refuses the cast.
+      effects: {
+        bolt(S, x, y) {
+          const t = sim.tower, v = sim.aim(x, y, S.speed);
+          sim.bolts.push({ x: t.x, y: t.y, vx: v.vx, vy: v.vy, struck: [] });
+          sim.fx.push({ type: 'shoot', x: t.x, y: t.y });
+        },
+        fireball(S, x, y) {
+          const t = sim.tower, v = sim.aim(x, y, S.speed);
+          sim.fireballs.push({ x: t.x, y: t.y, vx: v.vx, vy: v.vy, left: v.d });
+        },
+        frost(S, x, y) {
+          for (const e of sim.active()) {
+            if (Math.hypot(e.x - x, e.y - y) > S.radius) continue;
+            e.slow = S.slow * e.frostFactor; e.slowT = S.duration;
+            e.chill = S.hurts ? sim.everySecond(Math.floor(S.duration)) : null;
+          }
+        },
+        // strikes the enemy closest to (x, y), then each jump goes to the closest enemy not struck yet, if within reach
+        lightning(S, x, y) {
+          const first = sim.nearest(sim.active(), x, y);
+          if (!first) return false;
+          const struck = [first];
           for (let k = 1; k <= S.jumps; k++) {
             const last = struck[k - 1], next = sim.nearest(sim.active().filter(e => !struck.includes(e)), last.x, last.y);
             if (!next || Math.hypot(next.x - last.x, next.y - last.y) > S.reach) break;
             struck.push(next);
           }
           struck.forEach((e, k) => sim.hurt(e, S.damage[k]));
-          sim.fx.push({ type: 'lightning', points: struck.map(e => ({ x: e.x, y: e.y })), x: t.x, y: t.y });
-        } else if (id === 'fireball') {
-          const dx = x - t.x, dy = y - t.y, d = Math.hypot(dx, dy) || 1;
-          sim.fireballs.push({ x: t.x, y: t.y, vx: dx / d * S.speed, vy: dy / d * S.speed, left: d });
-        } else if (id === 'meteor') {
+          sim.fx.push({ type: 'lightning', points: struck.map(e => ({ x: e.x, y: e.y })), x: sim.tower.x, y: sim.tower.y });
+        },
+        meteor(S, x, y) {
           sim.meteors.push({ x, y, t: S.delay });
-        } else if (id === 'frost') {
-          for (const e of sim.active()) if (Math.hypot(e.x - x, e.y - y) <= S.radius) { e.slow = S.slow * e.frostFactor; e.slowT = S.duration; e.chill = S.hurts ? { ticks: Math.floor(S.duration), t: 1 } : null; }
-        }
+        },
+      },
+
+      // Velocity from the Torretta toward (x, y) at the given speed, and the distance to that point.
+      aim(x, y, speed) {
+        const t = sim.tower, dx = x - t.x, dy = y - t.y, d = Math.hypot(dx, dy) || 1;
+        return { vx: dx / d * speed, vy: dy / d * speed, d };
+      },
+
+      // A once-a-second clock for `ticks` hits (burning ground, a hurting Frost); tick(c, dt) is true when one is due.
+      everySecond: ticks => ({ ticks, t: 1 }),
+      tick(c, dt) {
+        if ((c.t -= dt) > 0) return false;
+        c.t += 1; c.ticks--;
+        return true;
       },
 
       // Damages an enemy; it is removed at the end of the step.
@@ -154,30 +182,26 @@ const OneTower = {
       // Burning ground hurts what stands in it once a second.
       updateFires(dt) {
         for (const f of sim.fires) {
-          f.t -= dt;
-          if (f.t <= 0) {
-            f.t += 1; f.ticks--;
-            for (const e of sim.active()) if (Math.hypot(e.x - f.x, e.y - f.y) <= f.radius) sim.hurt(e, SP.fireball.burn.dps);
-          }
+          if (sim.tick(f.clock, dt)) for (const e of sim.active()) if (Math.hypot(e.x - f.x, e.y - f.y) <= f.radius) sim.hurt(e, spellStats.fireball.burn.dps);
         }
-        sim.fires = sim.fires.filter(f => f.ticks > 0);
+        sim.fires = sim.fires.filter(f => f.clock.ticks > 0);
       },
 
       updateMeteors(dt) {
-        const M = SP.meteor;
+        const M = spellStats.meteor;
         for (const m of sim.meteors) { m.t -= dt; if (m.t <= 0) sim.blast(m.x, m.y, M.radius, M.damage); }
         sim.meteors = sim.meteors.filter(m => m.t > 0);
       },
 
       // A fireball explodes on the first enemy it touches, or when it reaches the click point.
       updateFireballs(dt) {
-        const F = SP.fireball;
+        const F = spellStats.fireball;
         for (const f of sim.fireballs) {
           const step = Math.min(F.speed * dt, f.left), s = step / F.speed;
           f.x += f.vx * s; f.y += f.vy * s; f.left -= step;
           if (f.left <= 0 || sim.active().some(e => sim.touches(e, f.x, f.y, F.size))) {
             f.dead = true; sim.blast(f.x, f.y, F.radius, F.damage);
-            if (F.burns) sim.fires.push({ x: f.x, y: f.y, radius: F.radius, ticks: F.burn.duration, t: 1 });
+            if (F.burns) sim.fires.push({ x: f.x, y: f.y, radius: F.radius, clock: sim.everySecond(F.burn.duration) });
           }
         }
         sim.fireballs = sim.fireballs.filter(f => !f.dead);
@@ -197,7 +221,7 @@ const OneTower = {
       // Enemies walk straight to the Torretta, stop when they touch it (or get within their range) and hit it every attackEvery
       // seconds (the first hit on arrival). Frost slows them down while it lasts.
       updateEnemies(dt) {
-        const t = sim.tower, called = [];
+        const t = sim.tower, summoned = [];
         for (const e of sim.enemies) {
           e.flash = Math.max(0, e.flash - dt);
           if (e.spawnT > 0) { e.spawnT -= dt; continue; }
@@ -207,16 +231,15 @@ const OneTower = {
               e.summonT += e.summon.every;
               for (let k = 0; k < e.summon.count; k++) {
                 const a = k / e.summon.count * Math.PI * 2;
-                called.push([e.summon.type, ...sim.awayFromTower(e.x + Math.cos(a) * e.size, e.y + Math.sin(a) * e.size, D.enemies[e.summon.type].size)]);
+                summoned.push([e.summon.type, ...sim.awayFromTower(e.x + Math.cos(a) * e.size, e.y + Math.sin(a) * e.size, D.enemies[e.summon.type].size)]);
               }
               sim.fx.push({ type: 'summon', x: e.x, y: e.y });
             }
           }
           e.slowT = Math.max(0, e.slowT - dt);
-          if (e.chill && (e.chill.t -= dt) <= 0) {   // a hurting Frost: 1 hit a second while it lasts
-            e.chill.t += 1;
-            sim.hurt(e, SP.frost.dps);
-            if (--e.chill.ticks <= 0) e.chill = null;
+          if (e.chill && sim.tick(e.chill, dt)) {   // a hurting Frost: 1 hit a second while it lasts
+            sim.hurt(e, spellStats.frost.dps);
+            if (e.chill.ticks <= 0) e.chill = null;
           }
           if (e.hp <= 0) continue;
           const speed = e.speed * (e.slowT > 0 ? 1 - e.slow : 1);
@@ -235,7 +258,7 @@ const OneTower = {
             }
           }
         }
-        for (const [id, x, y] of called) sim.addEnemy(id, x, y, D.spawnWarning);
+        for (const [id, x, y] of summoned) sim.addEnemy(id, x, y, D.spawnWarning);
       },
 
       // A wave starts after a pause, then its enemies walk in one at a time. Returns 'passed' once the last wave is defeated.

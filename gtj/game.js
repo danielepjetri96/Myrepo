@@ -45,12 +45,9 @@ const Sfx = {
   warn() { [0, 0.25, 0.5, 0.75].forEach(d => this.tone(880, 880, 0.08, 'square', 0.06, d)); },
   summon() { this.tone(90, 400, 0.4, 'sawtooth', 0.1); },
   boom() { this.tone(160, 40, 0.35, 'sawtooth', 0.12); },
-  cast(spell) {
-    if (spell === 'fireball') this.tone(300, 150, 0.2, 'sawtooth', 0.07);
-    else if (spell === 'frost') this.tone(1200, 600, 0.3, 'triangle', 0.08);
-    else if (spell === 'lightning') this.tone(1500, 80, 0.15, 'square', 0.08);
-    else if (spell === 'meteor') this.tone(900, 120, 0.9, 'sawtooth', 0.07);
-  },
+  // one tone per spell: [from Hz, to Hz, s, wave, volume]
+  CAST_TONES: { fireball: [300, 150, 0.2, 'sawtooth', 0.07], frost: [1200, 600, 0.3, 'triangle', 0.08], lightning: [1500, 80, 0.15, 'square', 0.08], meteor: [900, 120, 0.9, 'sawtooth', 0.07] },
+  cast(spell) { if (this.CAST_TONES[spell]) this.tone(...this.CAST_TONES[spell]); },
 };
 
 // ---- input: keyboard and mouse only ----
@@ -450,7 +447,6 @@ const FIELD_ART = {
   shaman: { c: '#b55dff', rows: ['..cc.y', '.cccc|', 'cecce|', '.cccc|', '.c..c|'] },
   boss:   { c: '#b13e53', rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccceecccceecc', 'ccceecccceecc', 'ccccccccccccc', 'cccc.....cccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
 };
-const SPELL_NAMES = { bolt: 'BOLT', fireball: 'FIREBALL', frost: 'FROST', lightning: 'LIGHTNING', meteor: 'METEOR' };
 
 function ring(x, y, r, color) { ctx.strokeStyle = color; ctx.beginPath(); ctx.arc(Math.round(x), Math.round(y), r, 0, Math.PI * 2); ctx.stroke(); }
 
@@ -498,7 +494,7 @@ function drawField() {
     if (on && left > 0) { ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y, 12, Math.ceil(11 * left)); }
     text(String(i + 1), x + 6, y + 2, on ? '#fff' : '#566c86', 8, 'center');
   });
-  text(SPELL_NAMES[sim.selected], W / 2, H - 25, '#fff', 8, 'center');
+  text(sim.selected.toUpperCase(), W / 2, H - 25, '#fff', 8, 'center');
 }
 
 function drawRoom() {
