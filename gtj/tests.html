@@ -1061,7 +1061,7 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     eq(sim.enemies.includes(g), false);
     const s2 = OneTower.create({ waves: [['goblin']], rng: seeded(1) });
     step(s2, { aimX: 0, aimY: 0, fire: true }, secs(1));
-    eq(fxCount(s2, 'shoot'), D.bolt.fireRate, 'shots in one second');
+    eq(fxCount(s2, 'shoot'), D.spells.bolt.fireRate, 'shots in one second');
   });
 
   test('otd: a goblin walks in from the edge at its speed, stops at the Torretta and hits it once a second', () => {
@@ -1142,6 +1142,91 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
       eq(play(closest), 'passed', 'bot, seed ' + seed);
       eq(play({}), 'lost', 'idle, seed ' + seed);
     }
+  });
+
+  // ---- spells ----
+  const ALL = ['bolt', 'fireball', 'frost', 'lightning', 'meteor'];
+  const press = (sim, key, input) => step(sim, Object.assign({ select: key }, input || {}));
+  const cast = (sim, key, x, y) => { press(sim, key); return step(sim, { aimX: x, aimY: y, fire: true }); };
+
+  test('otd spells: only unlocked spells can be selected; casting one starts its Ricarica and goes back to the Bolt', () => {
+    const sim = OneTower.create({ waves: [['goblin']], spells: ['bolt', 'fireball'], rng: seeded(1) });
+    eq(sim.selected, 'bolt', 'the Bolt is selected at the start');
+    press(sim, 3);
+    eq(sim.selected, 'bolt', 'Frost is still locked');
+    press(sim, 2);
+    eq(sim.selected, 'fireball');
+    step(sim, { aimX: 60, aimY: 60, fire: true });
+    eq(sim.recharge.fireball > D.spells.fireball.recharge - 0.1, true, 'fireball recharging');
+    eq(sim.selected, 'bolt', 'back to the Bolt after the cast');
+    press(sim, 2);
+    eq(sim.selected, 'bolt', 'a recharging spell cannot be selected');
+    step(sim, {}, secs(D.spells.fireball.recharge));
+    eq(sim.recharge.fireball <= 0, true, 'recharged');
+    press(sim, 2);
+    eq(sim.selected, 'fireball', 'selectable again');
+    eq(OneTower.SPELLS, ALL, 'keys 1-5 in order');
+  });
+
+  // A sim with every spell unlocked and still enemies placed by hand (the wave's goblin is far in the future).
+  const arena = () => { const sim = OneTower.create({ waves: [['goblin']], spells: ALL, rng: seeded(1) }); sim.waveTimer = 1e9; return sim; };
+  const still = (sim, id, x, y) => { const e = sim.addEnemy(id, x, y, 0); e.speed = 0; return e; };
+  const lost = (e, id) => D.enemies[id || 'goblin'].hp - e.hp;
+
+  test('otd fireball: explodes on the first enemy in its way, hurting everything within its radius', () => {
+    const sim = arena();
+    const a = still(sim, 'goblin', 60, 60), b = still(sim, 'goblin', 72, 60), far = still(sim, 'goblin', 60, 120);
+    cast(sim, 2, 60, 60);
+    step(sim, {}, secs(1.5));
+    eq([lost(a), lost(b), lost(far)], [D.spells.fireball.damage, D.spells.fireball.damage, 0]);
+  });
+
+  test('otd fireball: with nothing in its way it explodes where clicked', () => {
+    const sim = arena();
+    const near = still(sim, 'goblin', 60, 75);   // 15 px from the click, off the flight path
+    cast(sim, 2, 60, 60);
+    step(sim, {}, secs(1.5));
+    eq(lost(near), D.spells.fireball.damage);
+  });
+
+  // Distance an enemy walks in the given seconds.
+  const walked = (sim, e, s) => { const x = e.x, y = e.y; step(sim, {}, secs(s)); return Math.hypot(e.x - x, e.y - y); };
+
+  test('otd frost: slows the enemies in its area by 60% for 4 s, without damage', () => {
+    const sim = arena(), G = D.enemies.goblin, F = D.spells.frost;
+    const inside = sim.addEnemy('goblin', 60, 60, 0), outside = sim.addEnemy('goblin', 60, 140, 0);
+    cast(sim, 3, 62, 62);
+    eq(Math.abs(walked(sim, inside, 1) - G.speed * (1 - F.slow)) < 0.5, true, 'slowed');
+    eq(Math.abs(walked(sim, outside, 1) - G.speed) < 0.5, true, 'not slowed outside the area');
+    eq(lost(inside), 0, 'no damage');
+    step(sim, {}, secs(F.duration - 2 + 0.1));
+    eq(Math.abs(walked(sim, inside, 1) - G.speed) < 0.5, true, 'full speed again after the duration');
+  });
+
+  test('otd lightning: strikes the enemy closest to the cursor, then jumps to 2 more within reach for less damage', () => {
+    const sim = arena(), L = D.spells.lightning;
+    const a = still(sim, 'orc', 60, 60), b = still(sim, 'orc', 90, 60), c = still(sim, 'orc', 90, 90), far = still(sim, 'orc', 250, 150);
+    cast(sim, 4, 50, 50);
+    eq([lost(a, 'orc'), lost(b, 'orc'), lost(c, 'orc'), lost(far, 'orc')], [L.damage[0], L.damage[1], L.damage[2], 0]);
+  });
+
+  test('otd lightning: with no enemy on the field it is not cast and keeps its Ricarica', () => {
+    const sim = arena();
+    cast(sim, 4, 50, 50);
+    eq(sim.recharge.lightning, 0);
+    eq(sim.selected, 'lightning', 'still selected');
+  });
+
+  test('otd meteor: falls where clicked after 1 s of warning, hurting everything within its radius', () => {
+    const sim = arena(), M = D.spells.meteor;
+    const a = still(sim, 'orc', 60, 60), b = still(sim, 'orc', 60, 95), out = still(sim, 'orc', 60, 110);
+    cast(sim, 5, 60, 60);
+    eq(sim.meteors.length, 1, 'a warning marks where it will fall');
+    step(sim, {}, secs(M.delay - 0.1));
+    eq(lost(a, 'orc'), 0, 'not yet');
+    step(sim, {}, secs(0.2));
+    eq([lost(a, 'orc'), lost(b, 'orc'), lost(out, 'orc')], [M.damage, M.damage, 0]);
+    eq(sim.meteors.length, 0);
   });
 }
 

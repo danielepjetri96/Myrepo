@@ -4,6 +4,7 @@
 const OneTower = {
   W: 320,
   H: 180,
+  SPELLS: ['bolt', 'fireball', 'frost', 'lightning', 'meteor'],   // keys 1-5
 
   // Lists the enemy types of each wave for a level config ({ waves, perWave: [min, max], types: { id: weight } }).
   buildWaves(cfg, rng) {
@@ -18,54 +19,124 @@ const OneTower = {
     return Array.from({ length: cfg.waves }, () => Array.from({ length: min + Math.floor(rng() * (max - min + 1)) }, pick));
   },
 
-  // waves: lists of enemy types, one list per wave (see buildWaves).
-  create({ waves, rng }) {
-    const D = OneTowerData, B = D.bolt;
+  // waves: lists of enemy types, one list per wave (see buildWaves). spells: the unlocked spells.
+  create({ waves, spells = ['bolt'], rng }) {
+    const D = OneTowerData, B = D.spells.bolt;
     rng = rng || Math.random;
     const sim = {
       tower: { x: OneTower.W / 2, y: OneTower.H / 2, size: D.tower.size, hp: D.tower.hp, maxHp: D.tower.hp },
       enemies: [],
       bolts: [],
-      fx: [],                 // { type: 'shoot' | 'hit' | 'kill' | 'hurt', x, y }
+      fireballs: [],          // { x, y, vx, vy, left: px to the click point }
+      meteors: [],            // { x, y, t: s left before it falls }
+      fx: [],                 // { type: 'shoot' | 'cast' | 'deny' | 'blast' | 'hit' | 'kill' | 'hurt', x, y, ... }
       state: 'running',       // running | lost | passed
       waveIndex: 0,           // waves started so far
       waveCount: waves.length,
       waveTimer: D.firstWaveDelay,
       queue: [],              // enemy types of the current wave still to walk in
       spawnTimer: 0,
-      boltRecharge: 0,        // s left of the Bolt's Ricarica before it can fire again
+      spells,                 // unlocked spells
+      selected: 'bolt',
+      recharge: Object.fromEntries(OneTower.SPELLS.map(id => [id, 0])),   // s left of each spell's Ricarica
 
-      // input: { aimX, aimY (field coordinates), fire }. Returns 'passed', 'lost' or null.
+      // input: { aimX, aimY (field coordinates), fire, select (key 1-5 pressed this step) }. Returns 'passed', 'lost' or null.
       update(dt, input) {
         if (sim.state !== 'running') return null;
-        sim.boltRecharge = Math.max(-dt, sim.boltRecharge - dt);   // may go slightly negative so the cadence does not drift
-        if (input.fire && sim.boltRecharge <= 0) {
-          sim.boltRecharge += 1 / B.fireRate;
-          const t = sim.tower, dx = input.aimX - t.x, dy = input.aimY - t.y, d = Math.hypot(dx, dy) || 1;
-          sim.bolts.push({ x: t.x, y: t.y, vx: dx / d * B.speed, vy: dy / d * B.speed });
-          sim.fx.push({ type: 'shoot', x: t.x, y: t.y });
-        }
+        const r = sim.recharge;
+        for (const id in r) r[id] = Math.max(id === 'bolt' ? -dt : 0, r[id] - dt);   // the Bolt's may go slightly negative so its cadence does not drift
+        if (input.select) sim.select(OneTower.SPELLS[input.select - 1]);
+        if (input.fire && r[sim.selected] <= 0) sim.cast(sim.selected, input.aimX, input.aimY);
         sim.updateBolts(dt);
+        sim.updateFireballs(dt);
+        sim.updateMeteors(dt);
+        sim.enemies = sim.enemies.filter(e => e.hp > 0);
         sim.updateEnemies(dt);
         if (sim.tower.hp <= 0) { sim.state = 'lost'; return 'lost'; }
         return sim.updateWaves(dt);
+      },
+
+      // Only an unlocked spell that is not recharging can be selected.
+      select(id) {
+        if (spells.includes(id) && sim.recharge[id] <= 0) sim.selected = id;
+        else sim.fx.push({ type: 'deny', x: sim.tower.x, y: sim.tower.y });
+      },
+
+      // Casts a spell toward (x, y) and starts its Ricarica; after any spell but the Bolt the selection goes back to the Bolt.
+      cast(id, x, y) {
+        const t = sim.tower;
+        if (id === 'bolt') {
+          sim.recharge.bolt += 1 / B.fireRate;
+          const dx = x - t.x, dy = y - t.y, d = Math.hypot(dx, dy) || 1;
+          sim.bolts.push({ x: t.x, y: t.y, vx: dx / d * B.speed, vy: dy / d * B.speed });
+          sim.fx.push({ type: 'shoot', x: t.x, y: t.y });
+          return;
+        }
+        const S = D.spells[id];
+        const strike = id === 'lightning' && sim.nearest(sim.active(), x, y);
+        if (id === 'lightning' && !strike) { sim.fx.push({ type: 'deny', x, y }); return; }   // nothing to strike: keep it
+        sim.recharge[id] = S.recharge;
+        sim.selected = 'bolt';
+        sim.fx.push({ type: 'cast', spell: id, x, y });
+        if (id === 'lightning') {
+          // each jump goes to the closest enemy not struck yet, if within reach
+          const struck = [strike];
+          for (let k = 1; k < S.damage.length; k++) {
+            const last = struck[k - 1], next = sim.nearest(sim.active().filter(e => !struck.includes(e)), last.x, last.y);
+            if (!next || Math.hypot(next.x - last.x, next.y - last.y) > S.jump) break;
+            struck.push(next);
+          }
+          struck.forEach((e, k) => sim.hurt(e, S.damage[k]));
+          sim.fx.push({ type: 'lightning', points: struck.map(e => ({ x: e.x, y: e.y })), x: t.x, y: t.y });
+        } else if (id === 'fireball') {
+          const dx = x - t.x, dy = y - t.y, d = Math.hypot(dx, dy) || 1;
+          sim.fireballs.push({ x: t.x, y: t.y, vx: dx / d * S.speed, vy: dy / d * S.speed, left: d });
+        } else if (id === 'meteor') {
+          sim.meteors.push({ x, y, t: S.delay });
+        } else if (id === 'frost') {
+          for (const e of sim.active()) if (Math.hypot(e.x - x, e.y - y) <= S.radius) { e.slow = S.slow; e.slowT = S.duration; }
+        }
+      },
+
+      // Damages an enemy; it is removed at the end of the step.
+      hurt(e, damage) {
+        e.hp -= damage; e.flash = 0.08;
+        sim.fx.push({ type: e.hp <= 0 ? 'kill' : 'hit', x: e.x, y: e.y });
+      },
+      active: () => sim.enemies.filter(e => e.spawnT <= 0 && e.hp > 0),
+      nearest: (list, x, y) => list.reduce((best, e) => !best || Math.hypot(e.x - x, e.y - y) < Math.hypot(best.x - x, best.y - y) ? e : best, null),
+      touches: (e, x, y, size) => Math.abs(x - e.x) < (e.size + size) / 2 && Math.abs(y - e.y) < (e.size + size) / 2,
+      // Damages every active enemy whose centre is within radius of (x, y).
+      blast(x, y, radius, damage) {
+        for (const e of sim.active()) if (Math.hypot(e.x - x, e.y - y) <= radius) sim.hurt(e, damage);
+        sim.fx.push({ type: 'blast', x, y, radius });
+      },
+
+      updateMeteors(dt) {
+        const M = D.spells.meteor;
+        for (const m of sim.meteors) { m.t -= dt; if (m.t <= 0) sim.blast(m.x, m.y, M.radius, M.damage); }
+        sim.meteors = sim.meteors.filter(m => m.t > 0);
+      },
+
+      // A fireball explodes on the first enemy it touches, or when it reaches the click point.
+      updateFireballs(dt) {
+        const F = D.spells.fireball;
+        for (const f of sim.fireballs) {
+          const step = Math.min(F.speed * dt, f.left), s = step / F.speed;
+          f.x += f.vx * s; f.y += f.vy * s; f.left -= step;
+          if (f.left <= 0 || sim.active().some(e => sim.touches(e, f.x, f.y, F.size))) { f.dead = true; sim.blast(f.x, f.y, F.radius, F.damage); }
+        }
+        sim.fireballs = sim.fireballs.filter(f => !f.dead);
       },
 
       updateBolts(dt) {
         for (const b of sim.bolts) {
           b.x += b.vx * dt; b.y += b.vy * dt;
           if (b.x < 0 || b.x > OneTower.W || b.y < 0 || b.y > OneTower.H) { b.dead = true; continue; }
-          for (const e of sim.enemies) {
-            if (e.spawnT > 0 || e.hp <= 0) continue;
-            if (Math.abs(b.x - e.x) < (e.size + B.size) / 2 && Math.abs(b.y - e.y) < (e.size + B.size) / 2) {
-              b.dead = true; e.hp -= B.damage; e.flash = 0.08;
-              sim.fx.push({ type: e.hp <= 0 ? 'kill' : 'hit', x: e.x, y: e.y });
-              break;
-            }
-          }
+          const e = sim.active().find(e => sim.touches(e, b.x, b.y, B.size));
+          if (e) { b.dead = true; sim.hurt(e, B.damage); }
         }
         sim.bolts = sim.bolts.filter(b => !b.dead);
-        sim.enemies = sim.enemies.filter(e => e.hp > 0);
       },
 
       // Enemies walk straight to the Torretta, stop when they touch it and hit it every attackEvery seconds (the first hit on arrival).
@@ -74,10 +145,12 @@ const OneTower = {
         for (const e of sim.enemies) {
           e.flash = Math.max(0, e.flash - dt);
           if (e.spawnT > 0) { e.spawnT -= dt; continue; }
+          e.slowT = Math.max(0, e.slowT - dt);
+          const speed = e.speed * (e.slowT > 0 ? 1 - e.slow : 1);
           const dx = t.x - e.x, dy = t.y - e.y, d = Math.hypot(dx, dy) || 1, axis = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
           const gap = axis - (t.size + e.size) / 2;   // distance left before touching, on the dominant axis
           if (gap > 1e-9) {
-            const s = Math.min(e.speed * dt, gap * d / axis);   // the last step lands exactly against the Torretta
+            const s = Math.min(speed * dt, gap * d / axis);   // the last step lands exactly against the Torretta
             e.x += dx / d * s; e.y += dy / d * s;
           } else {
             e.attackT -= dt;
@@ -109,13 +182,21 @@ const OneTower = {
 
       // An enemy appears at a random point of the field's edge and blinks there before it walks in.
       spawn(id) {
-        const def = D.enemies[id], m = def.size / 2, W = OneTower.W - 2 * m, H = OneTower.H - 2 * m;
+        const m = D.enemies[id].size / 2, W = OneTower.W - 2 * m, H = OneTower.H - 2 * m;
         let r = rng() * 2 * (W + H), x, y;
         if (r < W) { x = r; y = 0; }
         else if ((r -= W) < H) { x = W; y = r; }
         else if ((r -= H) < W) { x = W - r; y = H; }
         else { x = 0; y = H - (r - W); }
-        sim.enemies.push({ type: id, x: x + m, y: y + m, size: def.size, hp: def.hp, speed: def.speed, damage: def.damage, attackEvery: def.attackEvery, attackT: 0, spawnT: D.spawnWarning, flash: 0 });
+        sim.addEnemy(id, x + m, y + m, D.spawnWarning);
+      },
+
+      // Puts an enemy on the field; it blinks for spawnT seconds before it moves. Returns it.
+      addEnemy(id, x, y, spawnT) {
+        const def = D.enemies[id];
+        const e = { type: id, x, y, size: def.size, hp: def.hp, speed: def.speed, damage: def.damage, attackEvery: def.attackEvery, attackT: 0, spawnT, flash: 0, slow: 0, slowT: 0 };
+        sim.enemies.push(e);
+        return e;
       },
     };
     return sim;
