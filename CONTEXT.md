@@ -8,6 +8,10 @@ Un videogioco per desktop che fonde tre minigiochi in un unico percorso a sblocc
 Il prodotto intero, formato da tre capitoli giocati in sequenza. Nome provvisorio.
 _Avoid_: il gioco, la fusione
 
+**Mago**:
+Il protagonista, lo stesso in tutti e tre i Capitoli: un giovane mago col cappello a punta che attraversa un unico viaggio fantasy (la campagna in Jump Guy, il sotterraneo del castello in Clear the Room, la cima della torre in One Tower Defense).
+_Avoid_: eroe, giocatore (per il personaggio), omino
+
 **Capitolo**:
 Uno dei tre giochi che compongono GtJ: Jump Guy, Clear the Room, One Tower Defense. Si sblocca solo completando il capitolo precedente.
 _Avoid_: gioco, minigioco, mondo
