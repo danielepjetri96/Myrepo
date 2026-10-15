@@ -21,16 +21,40 @@ const OneTower = {
     return waves;
   },
 
-  // waves: lists of enemy types, one list per wave (see buildWaves). spells: the unlocked spells.
-  create({ waves, spells = ['bolt'], rng }) {
-    const D = OneTowerData, B = D.spells.bolt;
+  // The spell and Torretta values with the given upgrades applied: { spells, tower }. The data is not changed.
+  stats(upgrades) {
+    const D = OneTowerData, out = JSON.parse(JSON.stringify({ spells: D.spells, tower: D.tower }));
+    const round = v => Math.round(v * 100) / 100;
+    for (const id of upgrades) {
+      const u = D.upgrades[id], o = u.target === 'tower' ? out.tower : out.spells[u.target];
+      for (const k in u.add || {}) o[k] = Array.isArray(o[k]) ? o[k].map(v => v + u.add[k]) : o[k] + u.add[k];
+      for (const k in u.mul || {}) o[k] = round(o[k] * u.mul[k]);
+      Object.assign(o, u.set);
+    }
+    return out;
+  },
+
+  // Up to 3 different upgrades to choose from: for the Torretta or an unlocked spell, never one already taken unless repeatable.
+  offerUpgrades({ spells, taken, rng }) {
+    rng = rng || Math.random;
+    const all = OneTowerData.upgrades;
+    const pool = Object.keys(all).filter(id => (all[id].target === 'tower' || spells.includes(all[id].target)) && (all[id].repeatable || !taken.includes(id)));
+    const offer = [];
+    while (offer.length < 3 && pool.length) offer.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
+    return offer;
+  },
+
+  // waves: lists of enemy types, one list per wave (see buildWaves). spells: the unlocked spells; upgrades: the ones taken.
+  create({ waves, spells = ['bolt'], upgrades = [], rng }) {
+    const D = OneTowerData, ST = OneTower.stats(upgrades), SP = ST.spells, B = SP.bolt;
     rng = rng || Math.random;
     const sim = {
-      tower: { x: OneTower.W / 2, y: OneTower.H / 2, size: D.tower.size, hp: D.tower.hp, maxHp: D.tower.hp },
+      tower: { x: OneTower.W / 2, y: OneTower.H / 2, size: ST.tower.size, hp: ST.tower.hp, maxHp: ST.tower.hp },
       enemies: [],
       bolts: [],
       fireballs: [],          // { x, y, vx, vy, left: px to the click point }
       meteors: [],            // { x, y, t: s left before it falls }
+      fires: [],              // burning ground left by a Fireball: { x, y, radius, ticks: hits left, t: s to the next }
       fx: [],                 // { type: 'shoot' | 'cast' | 'deny' | 'blast' | 'hit' | 'kill' | 'hurt', x, y, ... }
       state: 'running',       // running | lost | passed
       waveIndex: 0,           // waves started so far
@@ -54,6 +78,7 @@ const OneTower = {
         sim.updateBolts(dt);
         sim.updateFireballs(dt);
         sim.updateMeteors(dt);
+        sim.updateFires(dt);
         sim.enemies = sim.enemies.filter(e => e.hp > 0);
         sim.updateEnemies(dt);
         if (sim.tower.hp <= 0) { sim.state = 'lost'; return 'lost'; }
@@ -72,11 +97,11 @@ const OneTower = {
         if (id === 'bolt') {
           sim.recharge.bolt += 1 / B.fireRate;
           const dx = x - t.x, dy = y - t.y, d = Math.hypot(dx, dy) || 1;
-          sim.bolts.push({ x: t.x, y: t.y, vx: dx / d * B.speed, vy: dy / d * B.speed });
+          sim.bolts.push({ x: t.x, y: t.y, vx: dx / d * B.speed, vy: dy / d * B.speed, struck: [] });
           sim.fx.push({ type: 'shoot', x: t.x, y: t.y });
           return;
         }
-        const S = D.spells[id];
+        const S = SP[id];
         const strike = id === 'lightning' && sim.nearest(sim.active(), x, y);
         if (id === 'lightning' && !strike) { sim.fx.push({ type: 'deny', x, y }); return; }   // nothing to strike: keep it
         sim.recharge[id] = S.recharge;
@@ -85,9 +110,9 @@ const OneTower = {
         if (id === 'lightning') {
           // each jump goes to the closest enemy not struck yet, if within reach
           const struck = [strike];
-          for (let k = 1; k < S.damage.length; k++) {
+          for (let k = 1; k <= S.jumps; k++) {
             const last = struck[k - 1], next = sim.nearest(sim.active().filter(e => !struck.includes(e)), last.x, last.y);
-            if (!next || Math.hypot(next.x - last.x, next.y - last.y) > S.jump) break;
+            if (!next || Math.hypot(next.x - last.x, next.y - last.y) > S.reach) break;
             struck.push(next);
           }
           struck.forEach((e, k) => sim.hurt(e, S.damage[k]));
@@ -98,7 +123,7 @@ const OneTower = {
         } else if (id === 'meteor') {
           sim.meteors.push({ x, y, t: S.delay });
         } else if (id === 'frost') {
-          for (const e of sim.active()) if (Math.hypot(e.x - x, e.y - y) <= S.radius) { e.slow = S.slow * e.frostFactor; e.slowT = S.duration; }
+          for (const e of sim.active()) if (Math.hypot(e.x - x, e.y - y) <= S.radius) { e.slow = S.slow * e.frostFactor; e.slowT = S.duration; e.chill = S.hurts ? { ticks: Math.floor(S.duration), t: 1 } : null; }
         }
       },
 
@@ -116,19 +141,34 @@ const OneTower = {
         sim.fx.push({ type: 'blast', x, y, radius });
       },
 
+      // Burning ground hurts what stands in it once a second.
+      updateFires(dt) {
+        for (const f of sim.fires) {
+          f.t -= dt;
+          if (f.t <= 0) {
+            f.t += 1; f.ticks--;
+            for (const e of sim.active()) if (Math.hypot(e.x - f.x, e.y - f.y) <= f.radius) sim.hurt(e, SP.fireball.burn.dps);
+          }
+        }
+        sim.fires = sim.fires.filter(f => f.ticks > 0);
+      },
+
       updateMeteors(dt) {
-        const M = D.spells.meteor;
+        const M = SP.meteor;
         for (const m of sim.meteors) { m.t -= dt; if (m.t <= 0) sim.blast(m.x, m.y, M.radius, M.damage); }
         sim.meteors = sim.meteors.filter(m => m.t > 0);
       },
 
       // A fireball explodes on the first enemy it touches, or when it reaches the click point.
       updateFireballs(dt) {
-        const F = D.spells.fireball;
+        const F = SP.fireball;
         for (const f of sim.fireballs) {
           const step = Math.min(F.speed * dt, f.left), s = step / F.speed;
           f.x += f.vx * s; f.y += f.vy * s; f.left -= step;
-          if (f.left <= 0 || sim.active().some(e => sim.touches(e, f.x, f.y, F.size))) { f.dead = true; sim.blast(f.x, f.y, F.radius, F.damage); }
+          if (f.left <= 0 || sim.active().some(e => sim.touches(e, f.x, f.y, F.size))) {
+            f.dead = true; sim.blast(f.x, f.y, F.radius, F.damage);
+            if (F.burns) sim.fires.push({ x: f.x, y: f.y, radius: F.radius, ticks: F.burn.duration, t: 1 });
+          }
         }
         sim.fireballs = sim.fireballs.filter(f => !f.dead);
       },
@@ -137,8 +177,9 @@ const OneTower = {
         for (const b of sim.bolts) {
           b.x += b.vx * dt; b.y += b.vy * dt;
           if (b.x < 0 || b.x > OneTower.W || b.y < 0 || b.y > OneTower.H) { b.dead = true; continue; }
-          const e = sim.active().find(e => sim.touches(e, b.x, b.y, B.size));
-          if (e) { b.dead = true; sim.hurt(e, B.damage); }
+          // a piercing Bolt goes on, hitting each enemy once
+          const e = sim.active().find(e => !b.struck.includes(e) && sim.touches(e, b.x, b.y, B.size));
+          if (e) { b.struck.push(e); sim.hurt(e, B.damage); if (!B.pierce) b.dead = true; }
         }
         sim.bolts = sim.bolts.filter(b => !b.dead);
       },
@@ -162,6 +203,12 @@ const OneTower = {
             }
           }
           e.slowT = Math.max(0, e.slowT - dt);
+          if (e.chill && (e.chill.t -= dt) <= 0) {   // a hurting Frost: 1 hit a second while it lasts
+            e.chill.t += 1;
+            sim.hurt(e, SP.frost.dps);
+            if (--e.chill.ticks <= 0) e.chill = null;
+          }
+          if (e.hp <= 0) continue;
           const speed = e.speed * (e.slowT > 0 ? 1 - e.slow : 1);
           const dx = t.x - e.x, dy = t.y - e.y, d = Math.hypot(dx, dy) || 1, axis = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
           const gap = axis - (t.size + e.size) / 2 - e.range;   // distance left before touching (or reaching its range), on the dominant axis
@@ -214,7 +261,7 @@ const OneTower = {
         const def = D.enemies[id];
         const e = { type: id, x, y, size: def.size, hp: def.hp, maxHp: def.hp, speed: def.speed, damage: def.damage, attackEvery: def.attackEvery,
           range: def.range || 0, frostFactor: def.frostFactor || 1, summon: def.summon, summonT: def.summon ? def.summon.every : 0,
-          attackT: 0, spawnT, flash: 0, slow: 0, slowT: 0 };
+          attackT: 0, spawnT, flash: 0, slow: 0, slowT: 0, chill: null };
         sim.enemies.push(e);
         return e;
       },

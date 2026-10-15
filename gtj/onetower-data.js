@@ -16,11 +16,14 @@ const OneTowerData = {
       size: 3,          // hitbox side
     },
     // Palla di fuoco: flies from the Torretta and explodes where clicked, or on the first enemy in its way.
-    fireball: { recharge: 4, damage: 3, radius: 20, speed: 180, size: 5 },
-    // Gelo: an area where clicked that slows enemies down (slow: fraction of speed taken away) for a while. No damage.
-    frost: { recharge: 8, slow: 0.6, duration: 4, radius: 30 },
-    // Fulmine: strikes the enemy closest to the cursor at once, then jumps to the closest enemies within `jump` px.
-    lightning: { recharge: 6, damage: [4, 3, 2], jump: 40 },
+    // burns / burn: the ground left on fire after the blast (unlocked by a Potenziamento).
+    fireball: { recharge: 4, damage: 3, radius: 20, speed: 180, size: 5, burns: false, burn: { duration: 3, dps: 1 } },
+    // Gelo: an area where clicked that slows enemies down (slow: fraction of speed taken away) for a while.
+    // No damage unless `hurts` (a Potenziamento): then `dps` per second while slowed.
+    frost: { recharge: 8, slow: 0.6, duration: 4, radius: 30, hurts: false, dps: 1 },
+    // Fulmine: strikes the enemy closest to the cursor at once, then makes `jumps` jumps to the closest enemy within `reach` px.
+    // damage: per strike, in order (one more entry than the most jumps it can get).
+    lightning: { recharge: 6, jumps: 2, damage: [4, 3, 2, 1], reach: 40 },
     // Meteora: falls where clicked after `delay` seconds of warning.
     meteor: { recharge: 20, delay: 1, damage: 12, radius: 40 },
   },
@@ -34,6 +37,25 @@ const OneTowerData = {
     // The Boss: the last wave of the last level, alone. Every `summon.every` s it calls `count` enemies around itself;
     // Frost slows it only by `frostFactor` of the usual amount.
     boss:    { hp: 120, speed: 6, damage: 5, attackEvery: 1, size: 22, frostFactor: 0.5, summon: { every: 10, type: 'goblin', count: 3 } },
+  },
+
+  // Potenziamenti, offered 3 at a time. target: a spell or 'tower'; add / mul / set: the values they change
+  // (add on a list adds to every entry); repeatable: can be taken more than once.
+  upgrades: {
+    boltDamage:       { target: 'bolt',      name: 'BOLT: +1 DAMAGE',           add: { damage: 1 } },
+    boltRate:         { target: 'bolt',      name: 'BOLT: +50% FIRE RATE',      mul: { fireRate: 1.5 } },
+    boltPierce:       { target: 'bolt',      name: 'BOLT: PIERCES ENEMIES',     set: { pierce: true } },
+    fireballRadius:   { target: 'fireball',  name: 'FIREBALL: +30% RADIUS',     mul: { radius: 1.3 } },
+    fireballBurn:     { target: 'fireball',  name: 'FIREBALL: LEAVES FIRE',     set: { burns: true } },
+    fireballRecharge: { target: 'fireball',  name: 'FIREBALL: -25% RECHARGE',   mul: { recharge: 0.75 } },
+    frostDuration:    { target: 'frost',     name: 'FROST: +2 S',               add: { duration: 2 } },
+    frostDamage:      { target: 'frost',     name: 'FROST: 1 DAMAGE PER S',     set: { hurts: true } },
+    frostRadius:      { target: 'frost',     name: 'FROST: +30% RADIUS',        mul: { radius: 1.3 } },
+    lightningJump:    { target: 'lightning', name: 'LIGHTNING: +1 JUMP',        add: { jumps: 1 } },
+    lightningDamage:  { target: 'lightning', name: 'LIGHTNING: +2 DAMAGE',      add: { damage: 2 } },
+    meteorRecharge:   { target: 'meteor',    name: 'METEOR: -30% RECHARGE',     mul: { recharge: 0.7 } },
+    meteorDamage:     { target: 'meteor',    name: 'METEOR: +50% DAMAGE',       mul: { damage: 1.5 } },
+    towerHealth:      { target: 'tower',     name: 'TORRETTA: +5 MAX HEALTH',   add: { hp: 5 }, repeatable: true },
   },
 
   // One entry per level, easiest first. waves: waves in the level; perWave: [min, max] enemies per wave;

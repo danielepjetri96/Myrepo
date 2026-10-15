@@ -1210,6 +1210,13 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     eq([lost(a, 'orc'), lost(b, 'orc'), lost(c, 'orc'), lost(far, 'orc')], [L.damage[0], L.damage[1], L.damage[2], 0]);
   });
 
+  test('otd lightning: does not jump to an enemy out of reach', () => {
+    const sim = arena();
+    const a = still(sim, 'orc', 60, 60), b = still(sim, 'orc', 60 + D.spells.lightning.reach + 10, 60);
+    cast(sim, 4, 60, 60);
+    eq([lost(a, 'orc'), lost(b, 'orc')], [D.spells.lightning.damage[0], 0]);
+  });
+
   test('otd lightning: with no enemy on the field it is not cast and keeps its Ricarica', () => {
     const sim = arena();
     cast(sim, 4, 50, 50);
@@ -1295,6 +1302,75 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     const B = D.enemies.boss, F = D.spells.frost, sim = arena(), b = sim.addEnemy('boss', 40, 90, 0);
     cast(sim, 3, b.x, b.y);
     eq(Math.abs(walked(sim, b, 1) - B.speed * (1 - F.slow * B.frostFactor)) < 0.2, true);
+  });
+
+  // ---- upgrades ----
+  test('otd upgrades: each one changes the value it names, and the Torretta one stacks', () => {
+    const base = D.spells, st = ids => OneTower.stats(ids);
+    eq(st([]).spells.fireball.radius, base.fireball.radius, 'no upgrade, data values');
+    eq(st(['fireballRadius']).spells.fireball.radius, 26, 'fireball radius 20 -> 26');
+    eq(st(['boltDamage']).spells.bolt.damage, 2);
+    eq(st(['boltRate']).spells.bolt.fireRate, 3);
+    eq(st(['fireballRecharge']).spells.fireball.recharge, 3);
+    eq(st(['frostDuration']).spells.frost.duration, 6);
+    eq(st(['lightningDamage']).spells.lightning.damage.slice(0, 3), [6, 5, 4]);
+    eq(st(['meteorRecharge']).spells.meteor.recharge, 14);
+    eq(st(['meteorDamage']).spells.meteor.damage, 18);
+    eq(st(['towerHealth']).tower.hp, 25);
+    eq(st(['towerHealth', 'towerHealth']).tower.hp, 30);
+    eq(base.fireball.radius, 20, 'the data is left untouched');
+    eq(OneTower.create({ waves: [[]], upgrades: ['towerHealth'] }).tower.hp, 25, 'a level starts with the upgraded Torretta');
+  });
+
+  test('otd upgrades: 3 different offers, only for unlocked spells, never one already taken (but Torretta health)', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const offer = OneTower.offerUpgrades({ spells: ['bolt', 'fireball'], taken: ['boltDamage', 'towerHealth'], rng: seeded(seed) });
+      eq(offer.length, 3, 'seed ' + seed);
+      eq(new Set(offer).size, 3, 'all different');
+      for (const id of offer) {
+        const u = D.upgrades[id];
+        eq(u.target === 'tower' || ['bolt', 'fireball'].includes(u.target), true, id + ' for an unlocked spell');
+        eq(id !== 'boltDamage', true, 'not taken twice');
+      }
+    }
+    const seen = new Set();
+    for (let seed = 1; seed <= 200; seed++) OneTower.offerUpgrades({ spells: ['bolt'], taken: [], rng: seeded(seed) }).forEach(id => seen.add(id));
+    eq([...seen].sort(), ['boltDamage', 'boltPierce', 'boltRate', 'towerHealth'], 'every allowed one shows up with only the Bolt');
+  });
+
+  const upgraded = ups => { const sim = OneTower.create({ waves: [['goblin']], spells: ALL, upgrades: ups, rng: seeded(1) }); sim.waveTimer = 1e9; return sim; };
+
+  test('otd upgrades: a piercing Bolt hits every enemy in its line, each once', () => {
+    const sim = upgraded(['boltPierce']);
+    const a = still(sim, 'orc', 120, 90), b = still(sim, 'orc', 90, 90);
+    step(sim, { aimX: 0, aimY: 90, fire: true });
+    step(sim, {}, secs(1));
+    eq([lost(a, 'orc'), lost(b, 'orc')], [1, 1]);
+  });
+
+  test('otd upgrades: a burning Fireball leaves fire that hurts 1 a second for 3 s', () => {
+    const sim = upgraded(['fireballBurn']), F = D.spells.fireball;
+    const e = still(sim, 'orc', 60, 60);
+    cast(sim, 2, 60, 60);
+    for (let i = 0; i < secs(2) && !lost(e, 'orc'); i++) step(sim, {});
+    eq(lost(e, 'orc'), F.damage, 'the blast');
+    step(sim, {}, secs(F.burn.duration + 1));
+    eq(lost(e, 'orc'), F.damage + F.burn.duration * F.burn.dps, 'plus the fire');
+  });
+
+  test('otd upgrades: a hurting Frost deals 1 a second while it slows', () => {
+    const sim = upgraded(['frostDamage']), F = D.spells.frost;
+    const e = still(sim, 'orc', 60, 60);
+    cast(sim, 3, 60, 60);
+    step(sim, {}, secs(F.duration + 1));
+    eq(lost(e, 'orc'), F.duration * F.dps);
+  });
+
+  test('otd upgrades: Lightning with one more jump strikes 4 enemies', () => {
+    const sim = upgraded(['lightningJump']), L = D.spells.lightning;
+    const es = [[60, 60], [90, 60], [90, 90], [120, 90]].map(([x, y]) => still(sim, 'orc', x, y));
+    cast(sim, 4, 50, 50);
+    eq(es.map(e => lost(e, 'orc')), L.damage.slice(0, 4));
   });
 }
 
