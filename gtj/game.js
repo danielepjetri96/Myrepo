@@ -117,6 +117,12 @@ const meters = dist => Math.floor(dist * JumpGuyData.endless.metersPerPx);
 const ENDLESS = {
   jumpguy: { create: () => JumpGuy.create(JumpGuy.buildEndless()), score: s => meters(s.dist), unit: ' M', result: n => 'DISTANCE: ' + n + ' M' },
   cleartheroom: { create: () => ClearTheRoom.createEndless({}), score: s => s.roomsCleared, unit: ' ROOMS', result: n => 'ROOMS CLEARED: ' + n },
+  onetowerdefense: {
+    create: () => OneTower.createEndless({}), score: s => s.wavesCleared, unit: ' WAVES', result: n => 'WAVES CLEARED: ' + n,
+    // every few waves the run pauses for an upgrade, taken by the simulation itself
+    offerUpgrades: () => OneTower.offerUpgrades({ spells: sim.spells, taken: sim.upgrades }),
+    chooseUpgrade: id => sim.chooseUpgrade(id),
+  },
 };
 function toMenu() { scene = 'menu'; sceneTime = 0; }
 
@@ -128,8 +134,9 @@ const MENU = [
   { kind: 'chapter', i: 1 },
   { kind: 'endless', id: 'cleartheroom', name: 'CLEAR THE ROOM ENDLESS', indent: 12 },
   { kind: 'chapter', i: 2 },
+  { kind: 'endless', id: 'onetowerdefense', name: 'ONE TOWER DEFENSE ENDLESS', indent: 12 },
 ];
-const CARD = i => ({ x: 40, y: 46 + i * 23, w: 240, h: 22 });
+const CARD = i => ({ x: 40, y: 45 + i * 20, w: 240, h: 18 });
 const inRect = (p, r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
 
 function activateItem(i) {
@@ -146,8 +153,8 @@ function activateItem(i) {
 
 // Clickable buttons: rectangles shared by update (hit-testing) and draw.
 const BTN = {
-  sound: { x: 40, y: 164, w: 112, h: 12 },
-  reset: { x: 168, y: 164, w: 112, h: 12 },
+  sound: { x: 40, y: 166, w: 112, h: 12 },
+  reset: { x: 168, y: 166, w: 112, h: 12 },
   resume: { x: 90, y: 84, w: 140, h: 16 },
   pauseSound: { x: 90, y: 106, w: 140, h: 16 },
   quit: { x: 90, y: 128, w: 140, h: 16 },
@@ -273,7 +280,10 @@ function update() {
     if (wasPressed('Escape', 'KeyP')) { scene = 'pause'; sceneTime = 0; }
     else {
       const ev = PLAY[chapterId].update();
-      if (ev === 'hit') {
+      if (ev === 'upgrade') {   // an Endless pausing for an upgrade (never an empty offer: Torretta health repeats)
+        upgradeOffer = ENDLESS[chapterId].offerUpgrades();
+        Sfx.win(); scene = 'upgrade'; sceneTime = 0;
+      } else if (ev === 'hit') {
         Sfx.hit(); shake = 0.3; deathTimer = 0.9; scene = 'dying'; sceneTime = 0;
         if (mode === 'endless') {
           const score = ENDLESS[chapterId].score(sim);
@@ -312,7 +322,8 @@ function update() {
   } else if (scene === 'upgrade') {
     // one must be chosen (no way out): it belongs to the run from now on
     const k = sceneTime > 0.4 ? upgradeOffer.findIndex((id, i) => wasPressed('Digit' + (i + 1), 'Numpad' + (i + 1)) || hit(upgradeButton(i))) : -1;
-    if (k >= 0) { progression.addUpgrade(upgradeOffer[k]); progression.levelPassed(); clearedChapter = false; Sfx.select(); beginLevel(); }
+    if (k >= 0 && mode === 'endless') { ENDLESS[chapterId].chooseUpgrade(upgradeOffer[k]); Sfx.select(); mouse.down = false; scene = 'play'; sceneTime = 0; }
+    else if (k >= 0) { progression.addUpgrade(upgradeOffer[k]); progression.levelPassed(); clearedChapter = false; Sfx.select(); beginLevel(); }
   } else if (scene === 'cleared') {
     if (sceneTime > 0.4 && (wasPressed('Enter', 'Space', 'Escape') || click)) {
       if (clearedChapter || wasPressed('Escape')) toMenu(); else beginLevel();
@@ -584,7 +595,8 @@ function drawRoomMessages() {
 }
 function drawFieldMessages() {
   if (controlsHint > 0) text(sim.spells.length > 1 ? 'KEYS 1-' + sim.spells.length + ' CHOOSE A SPELL, CLICK TO CAST' : 'AIM WITH THE MOUSE, HOLD CLICK TO CAST THE BOLT', W / 2, 30, '#fff', 8, 'center');
-  if (sim.enemies.length === 0 && sim.waveIndex < sim.waveCount) text('WAVE ' + (sim.waveIndex + 1) + '/' + sim.waveCount, W / 2, 60, '#ffcd75', 16, 'center');
+  const next = 'WAVE ' + (sim.waveIndex + 1) + (sim.waveCount < Infinity ? '/' + sim.waveCount : '');
+  if (sim.enemies.length === 0 && sim.waveIndex < sim.waveCount && !sim.awaitingUpgrade) text(next, W / 2, 60, '#ffcd75', 16, 'center');
 }
 function drawBossBar(b) {
   text('BOSS', W / 2, 4, '#ef4444', 8, 'center');
@@ -604,7 +616,8 @@ function chapterEndText() {
 
 const upgradeButton = i => ({ x: 50, y: 108 + i * 20, w: 220, h: 16 });
 function drawUpgradeChoice() {
-  panel('LEVEL CLEARED!', ['CHOOSE AN UPGRADE (1-' + upgradeOffer.length + ')'], '#a7f070');
+  if (mode === 'endless') panel(sim.wavesCleared + ' WAVES HELD!', ['CHOOSE AN UPGRADE (1-' + upgradeOffer.length + '), +' + OneTowerData.endless.heal + ' TOWER HEALTH'], '#a7f070');
+  else panel('LEVEL CLEARED!', ['CHOOSE AN UPGRADE (1-' + upgradeOffer.length + ')'], '#a7f070');
   upgradeOffer.forEach((id, i) => button(upgradeButton(i), (i + 1) + '  ' + OneTowerData.upgrades[id].name, '#3b5dc9'));
 }
 
@@ -644,8 +657,8 @@ function drawMenu() {
     ctx.fillStyle = i === menuIndex && unlocked ? '#ffcd75' : '#1a1c2c'; ctx.fillRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
     ctx.fillStyle = unlocked ? '#3b5dc9' : '#333c57'; ctx.fillRect(r.x, r.y, r.w, r.h);
     const ix = item.indent || 0;
-    text(title, r.x + 8 + ix, r.y + 3, unlocked ? '#fff' : '#94a3b8', 8);
-    text(sub, r.x + 8 + ix, r.y + 13, unlocked ? '#a7f070' : '#94a3b8', 8);
+    text(title, r.x + 8 + ix, r.y + 1, unlocked ? '#fff' : '#94a3b8', 8);
+    text(sub, r.x + 8 + ix, r.y + 10, unlocked ? '#a7f070' : '#94a3b8', 8);
   });
   button(BTN.sound, soundLabel());
   button(BTN.reset, 'R  RESET PROGRESS');
