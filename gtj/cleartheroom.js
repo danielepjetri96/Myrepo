@@ -188,8 +188,13 @@ const ClearTheRoom = {
         for (const e of killed) sim.onKill(e);
       },
 
-      // Enemies that split spawn their children; some enemies leave a heart.
+      // Enemies that split spawn their children; some enemies leave a heart; the Boss takes its runners down with it.
       onKill(e) {
+        if (e === sim.boss) {
+          for (const o of sim.enemies) sim.fx.push({ type: 'kill', x: o.x, y: o.y });
+          sim.enemies = [];
+          return;
+        }
         const def = D.enemies[e.type] || D.boss;
         if (def.splits) {
           // Children appear on opposite sides of the corpse (when there is room) and blink briefly before they attack.

@@ -966,6 +966,15 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     lv.sim.boss.hp = 0;
     eq(stepLevel(lv, {}, secs(3)), 'passed');
   });
+
+  test('ctr boss: defeating the Boss passes the level even while its runners are still around', () => {
+    const sim = mkFarBoss();
+    sim.boss.hp = D.boss.hp / 2 - 1;
+    step(sim, {}, 1);
+    eq(sim.enemies.length > 1, true, 'runners summoned');
+    sim.boss.hp = 0;
+    eq(step(sim, {}, secs(3)), 'passed');
+  });
 }
 
 // ---- report ----
