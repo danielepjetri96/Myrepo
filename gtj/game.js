@@ -94,25 +94,29 @@ function beginLevel() {
   if (chapterId === 'cleartheroom') {
     const cfg = ClearTheRoomData.levels[run.level - 1];
     sim = ClearTheRoom.createLevel({ cfg });
-    roomHelp = 4;
   } else {
     sim = JumpGuy.create(JumpGuy.buildLevel(run.level));
   }
   hud = { lives: run.lives, level: run.level };
-  particles = []; mouse.down = false;   // a button still held from the menu must not fire
-  scene = 'play'; sceneTime = 0; gameOver = false;
+  enterPlay();
 }
 function startEndless(id) {
   chapterId = id; mode = 'endless'; endlessResult = null;
-  if (id === 'cleartheroom') { sim = ClearTheRoom.createEndless({}); roomHelp = 4; }
-  else sim = JumpGuy.create(JumpGuy.buildEndless());
-  particles = []; mouse.down = false;
+  sim = ENDLESS[id].create();
+  enterPlay();
+}
+// Common start of play, once sim is ready.
+function enterPlay() {
+  roomHelp = 4;                         // the controls hint (shown in Clear the Room only)
+  particles = []; mouse.down = false;   // a button still held from the menu must not fire
   scene = 'play'; sceneTime = 0; gameOver = false;
 }
 const meters = dist => Math.floor(dist * JumpGuyData.endless.metersPerPx);
-// Endless score of the run in progress, and how it reads: metres run in Jump Guy, rooms cleared in Clear the Room.
-const endlessScore = () => chapterId === 'cleartheroom' ? sim.roomsCleared : meters(sim.dist);
-const ENDLESS_UNIT = { jumpguy: ' M', cleartheroom: ' ROOMS' };
+// What differs between the Endless modes: how a run is built, its score (metres run, rooms cleared) and how the score reads.
+const ENDLESS = {
+  jumpguy: { create: () => JumpGuy.create(JumpGuy.buildEndless()), score: s => meters(s.dist), unit: ' M', result: n => 'DISTANCE: ' + n + ' M' },
+  cleartheroom: { create: () => ClearTheRoom.createEndless({}), score: s => s.roomsCleared, unit: ' ROOMS', result: n => 'ROOMS CLEARED: ' + n },
+};
 function toMenu() { scene = 'menu'; sceneTime = 0; }
 
 // ---- menu ----
@@ -233,7 +237,7 @@ function update() {
       if (ev === 'hit') {
         Sfx.hit(); shake = 0.3; deathTimer = 0.9; scene = 'dying'; sceneTime = 0;
         if (mode === 'endless') {
-          const score = endlessScore();
+          const score = ENDLESS[chapterId].score(sim);
           const newRecord = progression.submitEndless(chapterId, score);
           endlessResult = { score, record: progression.record(chapterId), newRecord };
           gameOver = true;
@@ -421,17 +425,16 @@ function drawRoom() {
 }
 
 function drawLives() {
-  if (chapterId === 'cleartheroom') {
-    for (let i = 0; i < sim.player.maxHp; i++) pixels(HEART, { r: i < sim.player.hp ? '#ef4444' : '#333c57' }, 6 + i * 10, 5);
-  }
+  const hearts = chapterId === 'cleartheroom';   // Salute is shown on the first row, pushing lives down
+  if (hearts) for (let i = 0; i < sim.player.maxHp; i++) pixels(HEART, { r: i < sim.player.hp ? '#ef4444' : '#333c57' }, 6 + i * 10, 5);
   if (mode === 'endless') {
-    const unit = ENDLESS_UNIT[chapterId];
-    text('ONE LIFE', 6, chapterId === 'cleartheroom' ? 16 : 6, '#fff', 8);
-    text(endlessScore() + unit, W - 6, 6, '#fff', 8, 'right');
-    text('BEST ' + progression.record(chapterId) + unit, W - 6, 18, '#ffcd75', 8, 'right');
+    const e = ENDLESS[chapterId];
+    text('ONE LIFE', 6, hearts ? 16 : 6, '#fff', 8);
+    text(e.score(sim) + e.unit, W - 6, 6, '#fff', 8, 'right');
+    text('BEST ' + progression.record(chapterId) + e.unit, W - 6, 18, '#ffcd75', 8, 'right');
     return;
   }
-  if (chapterId === 'cleartheroom') {
+  if (hearts) {
     text('LIVES ' + hud.lives, 6, 16, '#fff', 8);
     if (sim.boss) drawBossBar(sim.boss);
     else text('ROOM ' + (sim.roomIndex + 1) + '/' + sim.roomCount, W / 2, 6, '#fff', 8, 'center');
@@ -480,7 +483,7 @@ function drawMenu() {
     if (item.kind === 'endless') {
       unlocked = progression.isEndlessUnlocked(item.id);
       title = item.name;
-      sub = unlocked ? 'BEST: ' + progression.record(item.id) + ENDLESS_UNIT[item.id] : 'LOCKED - COMPLETE ' + CHAPTERS.find(c => c.id === item.id).name;
+      sub = unlocked ? 'BEST: ' + progression.record(item.id) + ENDLESS[item.id].unit : 'LOCKED - COMPLETE ' + CHAPTERS.find(c => c.id === item.id).name;
     } else {
       const c = CHAPTERS[item.i];
       unlocked = progression.isChapterUnlocked(c.id);
@@ -537,8 +540,8 @@ function draw() {
   } else if (scene === 'over') {
     if (mode === 'endless') {
       const r = endlessResult;
-      const unit = ENDLESS_UNIT[chapterId], result = chapterId === 'cleartheroom' ? 'ROOMS CLEARED: ' + r.score : 'DISTANCE: ' + r.score + unit;
-      panel(r.newRecord ? 'NEW RECORD!' : 'GAME OVER', [result, r.newRecord ? 'BEST BEATEN' : 'BEST: ' + r.record + unit, '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], r.newRecord ? '#ffcd75' : '#ef4444');
+      const e = ENDLESS[chapterId];
+      panel(r.newRecord ? 'NEW RECORD!' : 'GAME OVER', [e.result(r.score), r.newRecord ? 'BEST BEATEN' : 'BEST: ' + r.record + e.unit, '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], r.newRecord ? '#ffcd75' : '#ef4444');
     } else {
       panel('GAME OVER', ['NO LIVES LEFT', 'YOU RESTART FROM LEVEL 1', '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], '#ef4444');
     }
