@@ -19,34 +19,52 @@ const progression = Progression.create({ storage, chapters: CHAPTERS });
 const settings = Settings.create({ storage });
 
 // ---- sound (synthesized, created on first input) ----
+// Synthesized sound effects, one family: square and triangle waves with a soft attack, plus short filtered noise for
+// blasts and blows. Nothing is played while muted.
 const Sfx = {
   ac: null,
   init() {
     if (!this.ac) { try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
     if (this.ac && this.ac.state === 'suspended') this.ac.resume();
   },
+  // A tone gliding from f0 to f1 Hz over dur seconds; the 5 ms attack avoids clicks.
   tone(f0, f1, dur, type, vol, delay) {
     if (!this.ac || settings.muted) return;
     const t = this.ac.currentTime + (delay || 0), o = this.ac.createOscillator(), g = this.ac.createGain();
     o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
-    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g); g.connect(this.ac.destination); o.start(t); o.stop(t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.ac.destination); o.start(t); o.stop(t + dur + 0.01);
   },
-  jump() { this.tone(260, 620, 0.14, 'square', 0.08); },
-  hit() { this.tone(220, 40, 0.4, 'sawtooth', 0.14); },
-  win() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, f, 0.16, 'square', 0.09, i * 0.11)); },
-  over() { [330, 262, 196, 130].forEach((f, i) => this.tone(f, f * 0.9, 0.22, 'triangle', 0.14, i * 0.18)); },
-  shoot() { this.tone(520, 220, 0.07, 'square', 0.04); },
-  enemyHit() { this.tone(180, 120, 0.06, 'square', 0.06); },
-  kill() { this.tone(300, 60, 0.18, 'sawtooth', 0.08); },
-  heal() { this.tone(660, 990, 0.12, 'triangle', 0.08); },
-  select() { this.tone(440, 660, 0.08, 'square', 0.07); },
-  deny() { this.tone(120, 100, 0.12, 'square', 0.07); },
-  warn() { [0, 0.25, 0.5, 0.75].forEach(d => this.tone(880, 880, 0.08, 'square', 0.06, d)); },
-  summon() { this.tone(90, 400, 0.4, 'sawtooth', 0.1); },
-  boom() { this.tone(160, 40, 0.35, 'sawtooth', 0.12); },
+  // A burst of noise through a low-pass filter falling from f0 to f1 Hz: thuds, puffs and explosions.
+  noise(f0, f1, dur, vol, delay) {
+    if (!this.ac || settings.muted) return;
+    const t = this.ac.currentTime + (delay || 0), n = Math.ceil(this.ac.sampleRate * dur);
+    if (!this.noiseBuf || this.noiseBuf.length < n) {
+      this.noiseBuf = this.ac.createBuffer(1, Math.ceil(this.ac.sampleRate), this.ac.sampleRate);
+      const d = this.noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const src = this.ac.createBufferSource(), f = this.ac.createBiquadFilter(), g = this.ac.createGain();
+    src.buffer = this.noiseBuf; f.type = 'lowpass';
+    f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(this.ac.destination); src.start(t); src.stop(t + dur + 0.01);
+  },
+  jump() { this.tone(300, 620, 0.12, 'triangle', 0.09); },
+  hit() { this.noise(1800, 200, 0.25, 0.12); this.tone(220, 90, 0.25, 'square', 0.05); },
+  win() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, f, 0.16, 'triangle', 0.09, i * 0.1)); },
+  over() { [392, 330, 262, 196].forEach((f, i) => this.tone(f, f * 0.94, 0.24, 'triangle', 0.1, i * 0.18)); },
+  shoot() { this.tone(880, 520, 0.06, 'triangle', 0.035); },
+  enemyHit() { this.tone(240, 160, 0.06, 'square', 0.03); },
+  kill() { this.noise(2400, 300, 0.16, 0.07); this.tone(330, 110, 0.14, 'triangle', 0.05); },
+  heal() { this.tone(660, 990, 0.1, 'triangle', 0.07); this.tone(990, 1320, 0.1, 'triangle', 0.05, 0.08); },
+  select() { this.tone(520, 780, 0.06, 'square', 0.04); },
+  deny() { this.tone(160, 120, 0.1, 'square', 0.04); },
+  warn() { [0, 0.25, 0.5, 0.75].forEach(d => this.tone(880, 880, 0.07, 'triangle', 0.07, d)); },
+  summon() { this.tone(130, 390, 0.35, 'triangle', 0.09); this.noise(600, 2000, 0.3, 0.04); },
+  boom() { this.noise(1200, 80, 0.4, 0.14); this.tone(110, 40, 0.3, 'triangle', 0.1); },
   // one tone per spell: [from Hz, to Hz, s, wave, volume]
-  CAST_TONES: { fireball: [300, 150, 0.2, 'sawtooth', 0.07], frost: [1200, 600, 0.3, 'triangle', 0.08], lightning: [1500, 80, 0.15, 'square', 0.08], meteor: [900, 120, 0.9, 'sawtooth', 0.07] },
+  CAST_TONES: { fireball: [420, 210, 0.18, 'triangle', 0.08], frost: [1320, 660, 0.28, 'triangle', 0.06], lightning: [1600, 220, 0.12, 'square', 0.05], meteor: [1000, 160, 0.8, 'triangle', 0.07] },
   cast(spell) { if (this.CAST_TONES[spell]) this.tone(...this.CAST_TONES[spell]); },
 };
 
@@ -86,6 +104,8 @@ let controlsHint = 0;               // seconds left of the controls hint shown a
 let sim = null, deathTimer = 0, sceneTime = 0, shake = 0, gameOver = false;
 let upgradeChoice = null;           // the upgrade on offer, after a level or mid-Endless (see upgradeChoiceOf)
 let sparks = [];
+const FADE = 0.35;                  // s of the fade from black
+let fadeIn = FADE, fadeSim = null;  // seconds left of it, and the run it was last shown for
 let mageTrail = { x: 0, y: 0 };      // where the Mago was last drawn in Clear the Room (to tell walking from standing)
 let mageCastT = 0;                  // seconds left of the Mago's casting pose in One Tower Defense                    // short-lived lines and rings drawn over the field (lightning, distant strikes, blasts, Frost)
 
@@ -198,7 +218,8 @@ function updateRunner() {
   const pressed = wasPressed(...JUMP_KEYS) || !!click;
   const wasGrounded = sim.grounded;
   const ev = sim.update(DT, { pressed });
-  if (pressed && wasGrounded && !sim.grounded) Sfx.jump();
+  if (pressed && wasGrounded && !sim.grounded) { Sfx.jump(); burst(JumpGuy.PLAYER_X + JumpGuy.PLAYER_W / 2, JumpGuy.GROUND, 'dust', 6); }
+  updateParticles();
   return ev;
 }
 
@@ -236,17 +257,18 @@ function playFx() {
   mageCastT = Math.max(0, mageCastT - DT);
   for (const f of sim.fx) {
     if (f.type === 'shoot' || f.type === 'cast') mageCastT = 0.2;
-    if (f.type === 'shoot') Sfx.shoot();
-    else if (f.type === 'hit') { Sfx.enemyHit(); burst(f.x, f.y, COLORS.lime, 3); }
-    else if (f.type === 'kill') { Sfx.kill(); burst(f.x, f.y, COLORS.lime, 10); }
-    else if (f.type === 'hurt') { Sfx.hit(); shake = 0.15; }
-    else if (f.type === 'heal') { Sfx.heal(); burst(f.x, f.y, COLORS.red, 6); }
+    if (f.type === 'shoot') { Sfx.shoot(); burst(f.x, f.y, 'magic', 3); }
+    else if (f.type === 'hit') { Sfx.enemyHit(); burst(f.x, f.y, 'spark', 4); }
+    else if (f.type === 'kill') { Sfx.kill(); burst(f.x, f.y, 'puff', 8); burst(f.x, f.y, 'spark', 6); }
+    else if (f.type === 'hurt') { Sfx.hit(); shake = 0.15; burst(f.x, f.y, 'hurt', 8); }
+    else if (f.type === 'heal') { Sfx.heal(); burst(f.x, f.y, 'heal', 8); }
     else if (f.type === 'warn') Sfx.warn();
-    else if (f.type === 'summon') { Sfx.summon(); burst(f.x, f.y, COLORS.red, 14); }
+    else if (f.type === 'summon') { Sfx.summon(); burst(f.x, f.y, 'dark', 16); }
     else if (f.type === 'deny') Sfx.deny();
     else if (f.type === 'cast') { Sfx.cast(f.spell); if (f.spell === 'frost') sparks.push({ ring: true, x: f.x, y: f.y, r: sim.stats.spells.frost.radius, color: COLORS.cyan, life: 0.4 }); }
-    else if (f.type === 'blast') { Sfx.boom(); burst(f.x, f.y, COLORS.orange, 14); sparks.push({ ring: true, x: f.x, y: f.y, r: f.radius, color: COLORS.yellow, life: 0.25 }); }
-    else if (f.type === 'lightning') sparks.push({ points: [{ x: f.x, y: f.y }, ...f.points], color: COLORS.white, life: 0.2 });
+    else if (f.type === 'blast') { Sfx.boom(); burst(f.x, f.y, 'fire', 18); burst(f.x, f.y, 'puff', 6); sparks.push({ ring: true, x: f.x, y: f.y, r: f.radius, color: COLORS.yellow, life: 0.25 }); }
+    else if (f.type === 'lightning') for (const q of f.points) burst(q.x, q.y, 'magic', 5);
+    if (f.type === 'lightning') sparks.push({ points: [{ x: f.x, y: f.y }, ...f.points], color: COLORS.white, life: 0.2 });
     else if (f.type === 'zap') sparks.push({ points: [{ x: f.x, y: f.y }, { x: f.tx, y: f.ty }], color: COLORS.purple, life: 0.15 });
   }
   for (const k of sparks) k.life -= DT;
@@ -278,19 +300,46 @@ function updateTower() {
   return ev === 'lost' ? 'hit' : ev;
 }
 
-// Small visual particles (not part of the simulation).
+// Small visual particles (not part of the simulation). Each kind of effect: the colors it fades through (bright to
+// dark), how many pixels wide, how fast, how long, and its gravity (negative rises).
 let particles = [];
-function burst(x, y, color, n) {
+const EFFECTS = {
+  spark: { colors: ['white', 'yellow', 'orange'], size: 1, speed: [40, 90], life: 0.25, gravity: 0 },
+  puff:  { colors: ['white', 'silver', 'grey'],   size: 2, speed: [15, 45], life: 0.45, gravity: -20 },
+  fire:  { colors: ['yellow', 'orange', 'red'],   size: 2, speed: [30, 90], life: 0.45, gravity: 40 },
+  heal:  { colors: ['white', 'red'],              size: 1, speed: [5, 20],  life: 0.6,  gravity: -60 },
+  magic: { colors: ['white', 'cyan', 'sky'],      size: 1, speed: [20, 50], life: 0.3,  gravity: 0 },
+  dark:  { colors: ['red', 'purple', 'black'],    size: 2, speed: [20, 60], life: 0.5,  gravity: 0 },
+  hurt:  { colors: ['white', 'red', 'purple'],    size: 1, speed: [40, 80], life: 0.3,  gravity: 60 },
+  dust:  { colors: ['white', 'silver'],           size: 1, speed: [10, 30], life: 0.3,  gravity: 30 },
+};
+function burst(x, y, kind, n) {
+  const k = EFFECTS[kind];
   for (let i = 0; i < n; i++) {
-    const a = Math.random() * Math.PI * 2, sp = 30 + Math.random() * 60;
-    particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.3 + Math.random() * 0.2, color });
+    const a = Math.random() * Math.PI * 2, sp = k.speed[0] + Math.random() * (k.speed[1] - k.speed[0]), life = k.life * (0.7 + Math.random() * 0.6);
+    particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life, max: life, kind: k });
   }
 }
 function updateParticles() {
-  for (const p of particles) { p.x += p.vx * DT; p.y += p.vy * DT; p.life -= DT; }
+  for (const p of particles) { p.vy += p.kind.gravity * DT; p.x += p.vx * DT; p.y += p.vy * DT; p.life -= DT; }
   particles = particles.filter(p => p.life > 0);
 }
+// Draws the particles shifted by (-ox, -oy) (a camera); each one darkens through its colors and shrinks as it fades.
+function drawParticles(ox, oy) {
+  for (const p of particles) {
+    const c = p.kind.colors, k = 1 - p.life / p.max, size = k > 0.6 && p.kind.size > 1 ? p.kind.size - 1 : p.kind.size;
+    ctx.fillStyle = COLORS[c[Math.min(c.length - 1, Math.floor(k * c.length))]];
+    ctx.fillRect(Math.round(p.x - ox), Math.round(p.y - oy), size, size);
+  }
+}
 function update() {
+  const before = scene;
+  update1();
+  // a new level or run (a new sim), or a return to the menu, comes in from black
+  if (sim !== fadeSim || (scene === 'menu' && before !== 'menu' && before !== 'confirm')) { fadeIn = FADE; fadeSim = sim; }
+  fadeIn = Math.max(0, fadeIn - DT);
+}
+function update1() {
   sceneTime += DT;
   if (wasPressed('KeyM')) { settings.toggleMuted(); Sfx.select(); }
   if (shake > 0) shake = Math.max(0, shake - DT);
@@ -567,6 +616,7 @@ function drawLevel() {
   const mx = J.PLAYER_X + (J.PLAYER_W - MAGE_W) / 2, my = sim.y - MAGE_H;
   if (scene === 'dying') drawMageDeath(mx, my, sceneTime);
   else drawMage(mx, my, sim.grounded ? 'run' : sim.vy < 0 ? 'jump' : 'fall', sim.dist / 90);
+  drawParticles(0, 0);
 }
 
 // Enemies as single-pixel art, two frames each (facing right), with the colors of their letters and how fast the
@@ -718,7 +768,7 @@ function drawField() {
     for (const q of k.points.slice(1)) ctx.lineTo(q.x, q.y);
     ctx.stroke();
   }
-  for (const q of particles) { ctx.fillStyle = q.color; ctx.fillRect(Math.round(q.x), Math.round(q.y), 2, 2); }
+  drawParticles(0, 0);
   if (scene === 'play') {
     ctx.fillStyle = COLORS.white;
     ctx.fillRect(Math.round(mouse.x) - 3, Math.round(mouse.y), 7, 1); ctx.fillRect(Math.round(mouse.x), Math.round(mouse.y) - 3, 1, 7);
@@ -809,7 +859,7 @@ function drawRoom() {
     drawMage(mx, my, mouse.down && scene === 'play' ? 'cast' : moving ? 'run' : 'idle', sceneTime * 0.8, p.dirX < 0);
   }
   mageTrail = { x: p.x, y: p.y };
-  for (const q of particles) { ctx.fillStyle = q.color; ctx.fillRect(Math.round(q.x - cam.x), Math.round(q.y - cam.y), 2, 2); }
+  drawParticles(cam.x, cam.y);
   // crosshair at the mouse position
   if (scene === 'play') {
     ctx.fillStyle = COLORS.white;
@@ -990,6 +1040,11 @@ function draw() {
   }
 }
 
+// The fade from black, over everything.
+function drawFade() {
+  if (fadeIn > 0) { ctx.setTransform(VIEW_SCALE, 0, 0, VIEW_SCALE, 0, 0); ctx.fillStyle = withAlpha(COLORS.black, fadeIn / FADE); ctx.fillRect(0, 0, W, H); }
+}
+
 // ---- canvas scaling and main loop ----
 let VIEW_SCALE = 1;
 function resize() {
@@ -1008,6 +1063,7 @@ function frame(now) {
   acc += Math.min(0.1, (now - last) / 1000); last = now;
   while (acc >= DT) { update(); acc -= DT; }
   draw();
+  drawFade();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
