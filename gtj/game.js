@@ -79,12 +79,12 @@ let scene = 'menu';           // menu | play | pause | confirm | dying | cleared
 let menuIndex = 0;
 let hud = { lives: 0, level: 1 };   // what the HUD shows, kept apart from Progression (which resets on game over)
 let clearedChapter = false;
-let chapterId = 'jumpguy';           // chapter being played: jumpguy | cleartheroom
+let chapterId = 'jumpguy';           // chapter being played: jumpguy | cleartheroom | onetowerdefense
 let mode = 'chapter';               // chapter | endless
 let endlessResult = null;           // { score, record, newRecord } after an endless run
 let controlsHint = 0;               // seconds left of the controls hint shown at the start of play
 let sim = null, deathTimer = 0, sceneTime = 0, shake = 0, gameOver = false;
-let upgradeOffer = [];              // the upgrades to choose from after a One Tower Defense level
+let upgradeChoice = null;           // the upgrade on offer, after a level or mid-Endless (see upgradeChoiceOf)
 let sparks = [];                    // short-lived lines and rings drawn over the field (lightning, distant strikes, blasts, Frost)
 
 // Starts (or resumes, if a saved run exists) a chapter at its saved level.
@@ -113,17 +113,30 @@ function enterPlay() {
   scene = 'play'; sceneTime = 0; gameOver = false;
 }
 const meters = dist => Math.floor(dist * JumpGuyData.endless.metersPerPx);
-// What differs between the Endless modes: how a run is built, its score (metres run, rooms cleared) and how the score reads.
+// What differs between the Endless modes: how a run is built, its score (metres run, rooms cleared, waves cleared), how the
+// score reads, an extra HUD line, and the upgrade offered when a run pauses for one.
 const ENDLESS = {
   jumpguy: { create: () => JumpGuy.create(JumpGuy.buildEndless()), score: s => meters(s.dist), unit: ' M', result: n => 'DISTANCE: ' + n + ' M' },
   cleartheroom: { create: () => ClearTheRoom.createEndless({}), score: s => s.roomsCleared, unit: ' ROOMS', result: n => 'ROOMS CLEARED: ' + n },
   onetowerdefense: {
     create: () => OneTower.createEndless({}), score: s => s.wavesCleared, unit: ' WAVES', result: n => 'WAVES CLEARED: ' + n,
-    // every few waves the run pauses for an upgrade, taken by the simulation itself
-    offerUpgrades: () => OneTower.offerUpgrades({ spells: sim.spells, taken: sim.upgrades }),
-    chooseUpgrade: id => sim.chooseUpgrade(id),
+    hud: s => text('WAVE ' + Math.max(1, s.waveIndex), W / 2, 6, '#fff', 8, 'center'),
+    // every few waves the run pauses for an upgrade, taken by the simulation itself, then play resumes
+    upgradeChoice: s => upgradeChoiceOf(s.wavesCleared + ' WAVES HELD!', '+' + OneTowerData.endless.heal + ' TOWER HEALTH',
+      OneTower.offerUpgrades({ spells: s.spells, taken: s.upgrades }),
+      id => { s.chooseUpgrade(id); mouse.down = false; scene = 'play'; sceneTime = 0; }),
   },
 };
+// Records the score of the Endless run in progress (on game over, or when quitting it).
+function submitEndlessScore() {
+  const score = ENDLESS[chapterId].score(sim);
+  const newRecord = progression.submitEndless(chapterId, score);
+  endlessResult = { score, record: progression.record(chapterId), newRecord };
+}
+// An upgrade on offer: the screen's title and note, the upgrade ids with their names, and what taking one does.
+function upgradeChoiceOf(title, note, offer, choose) {
+  return { title, note, offer, labels: offer.map(id => OneTowerData.upgrades[id].name), choose };
+}
 function toMenu() { scene = 'menu'; sceneTime = 0; }
 
 // ---- menu ----
@@ -209,8 +222,10 @@ const PLAY = {
   onetowerdefense: {
     level: n => OneTower.create({ waves: OneTower.buildWaves(OneTowerData.levels[n - 1]), spells: OneTower.levelSpells(n), upgrades: progression.run.upgrades }),
     update: updateTower, draw: drawField, hud: drawFieldHud, messages: drawFieldMessages, hideCursor: true,
-    // after a level: 3 upgrades for the spells of the next one
-    offerUpgrades: () => OneTower.offerUpgrades({ spells: OneTower.levelSpells(progression.run.level + 1), taken: progression.run.upgrades }),
+    // after a level: 3 upgrades for the spells of the next one; the level is saved as passed once one is taken
+    upgradeChoice: run => upgradeChoiceOf('LEVEL CLEARED!', '',
+      OneTower.offerUpgrades({ spells: OneTower.levelSpells(run.level + 1), taken: run.upgrades }),
+      id => { progression.addUpgrade(id); progression.levelPassed(); clearedChapter = false; beginLevel(); }),
   },
 };
 
@@ -281,14 +296,12 @@ function update() {
     else {
       const ev = PLAY[chapterId].update();
       if (ev === 'upgrade') {   // an Endless pausing for an upgrade (never an empty offer: Torretta health repeats)
-        upgradeOffer = ENDLESS[chapterId].offerUpgrades();
+        upgradeChoice = ENDLESS[chapterId].upgradeChoice(sim);
         Sfx.win(); scene = 'upgrade'; sceneTime = 0;
       } else if (ev === 'hit') {
         Sfx.hit(); shake = 0.3; deathTimer = 0.9; scene = 'dying'; sceneTime = 0;
         if (mode === 'endless') {
-          const score = ENDLESS[chapterId].score(sim);
-          const newRecord = progression.submitEndless(chapterId, score);
-          endlessResult = { score, record: progression.record(chapterId), newRecord };
+          submitEndlessScore();
           gameOver = true;
         } else {
           hud.lives = Math.max(0, hud.lives - 1);
@@ -299,17 +312,17 @@ function update() {
         Sfx.win(); sceneTime = 0;
         // Between levels some chapters offer an upgrade first: the level is saved as passed only once one is chosen,
         // so leaving on that screen replays the level rather than losing the choice.
-        const run = progression.run, offer = PLAY[chapterId].offerUpgrades;
+        const run = progression.run, choice = PLAY[chapterId].upgradeChoice;
         const lastLevel = run && run.level >= CHAPTERS.find(c => c.id === chapterId).levels;
-        upgradeOffer = run && offer && !lastLevel ? offer() : [];
-        if (upgradeOffer.length) scene = 'upgrade';
+        upgradeChoice = run && choice && !lastLevel ? choice(run) : null;
+        if (upgradeChoice && upgradeChoice.offer.length) scene = 'upgrade';
         else { const passed = progression.levelPassed(); clearedChapter = !!(passed && passed.chapterCompleted); scene = 'cleared'; }
       }
     }
   } else if (scene === 'pause') {
     if (hit(BTN.pauseSound)) { settings.toggleMuted(); Sfx.select(); }
     if (wasPressed('Escape', 'KeyP', 'Enter') || hit(BTN.resume)) { scene = 'play'; sceneTime = 0; }
-    else if (wasPressed('KeyQ') || hit(BTN.quit)) toMenu();
+    else if (wasPressed('KeyQ') || hit(BTN.quit)) { if (mode === 'endless') submitEndlessScore(); toMenu(); }   // an Endless run still counts
   } else if (scene === 'confirm') {
     if (wasPressed('KeyY') || hit(BTN.yes)) { progression.reset(); menuIndex = 0; endlessResult = null; Sfx.select(); toMenu(); }
     else if (wasPressed('KeyN', 'Escape') || hit(BTN.no)) toMenu();
@@ -321,9 +334,9 @@ function update() {
     }
   } else if (scene === 'upgrade') {
     // one must be chosen (no way out): it belongs to the run from now on
-    const k = sceneTime > 0.4 ? upgradeOffer.findIndex((id, i) => wasPressed('Digit' + (i + 1), 'Numpad' + (i + 1)) || hit(upgradeButton(i))) : -1;
-    if (k >= 0 && mode === 'endless') { ENDLESS[chapterId].chooseUpgrade(upgradeOffer[k]); Sfx.select(); mouse.down = false; scene = 'play'; sceneTime = 0; }
-    else if (k >= 0) { progression.addUpgrade(upgradeOffer[k]); progression.levelPassed(); clearedChapter = false; Sfx.select(); beginLevel(); }
+    const offer = upgradeChoice.offer;
+    const k = sceneTime > 0.4 ? offer.findIndex((id, i) => wasPressed('Digit' + (i + 1), 'Numpad' + (i + 1)) || hit(upgradeButton(i))) : -1;
+    if (k >= 0) { Sfx.select(); upgradeChoice.choose(offer[k]); }
   } else if (scene === 'cleared') {
     if (sceneTime > 0.4 && (wasPressed('Enter', 'Space', 'Escape') || click)) {
       if (clearedChapter || wasPressed('Escape')) toMenu(); else beginLevel();
@@ -564,6 +577,7 @@ function drawLives() {
     text('ONE LIFE', 6, c.hearts ? 16 : 6, '#fff', 8);
     text(e.score(sim) + e.unit, W - 6, 6, '#fff', 8, 'right');
     text('BEST ' + progression.record(chapterId) + e.unit, W - 6, 18, '#ffcd75', 8, 'right');
+    if (e.hud) e.hud(sim);
     return;
   }
   c.hud();
@@ -616,9 +630,9 @@ function chapterEndText() {
 
 const upgradeButton = i => ({ x: 50, y: 108 + i * 20, w: 220, h: 16 });
 function drawUpgradeChoice() {
-  if (mode === 'endless') panel(sim.wavesCleared + ' WAVES HELD!', ['CHOOSE AN UPGRADE (1-' + upgradeOffer.length + '), +' + OneTowerData.endless.heal + ' TOWER HEALTH'], '#a7f070');
-  else panel('LEVEL CLEARED!', ['CHOOSE AN UPGRADE (1-' + upgradeOffer.length + ')'], '#a7f070');
-  upgradeOffer.forEach((id, i) => button(upgradeButton(i), (i + 1) + '  ' + OneTowerData.upgrades[id].name, '#3b5dc9'));
+  const c = upgradeChoice;
+  panel(c.title, ['CHOOSE AN UPGRADE (1-' + c.offer.length + ')' + (c.note ? ', ' + c.note : '')], '#a7f070');
+  c.labels.forEach((name, i) => button(upgradeButton(i), (i + 1) + '  ' + name, '#3b5dc9'));
 }
 
 function panel(title, lines, color) {
