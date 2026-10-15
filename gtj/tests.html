@@ -1470,6 +1470,68 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     eq(called.length, B.summon.count);
     for (const g of called) eq(gapTo(t, g) > 4, true, 'gap ' + gapTo(t, g).toFixed(1));
   });
+
+  // ---- Endless ----
+  test('otd endless: waves grow from 4-5 goblins to 12-15 enemies at wave 25, then hold', () => {
+    const w1 = OneTower.endlessWave(1), w25 = OneTower.endlessWave(25);
+    eq(w1.perWave, [4, 5]); eq(Object.keys(w1.types), ['goblin']);
+    eq(w25.perWave, [12, 15]); eq(Object.keys(w25.types).sort(), ['goblin', 'orc', 'shaman', 'wolf']);
+    for (let n = 2; n <= 50; n++) {
+      const a = OneTower.endlessWave(n - 1), b = OneTower.endlessWave(n);
+      eq(b.perWave[0] >= a.perWave[0] && b.perWave[1] >= a.perWave[1], true, 'wave ' + n + ' not easier');
+      eq(Object.keys(a.types).every(id => id in b.types), true, 'wave ' + n + ' keeps every type');
+      eq('boss' in b.types, false, 'no Boss');
+    }
+    eq(OneTower.endlessWave(40), w25, 'holds after wave 25');
+    const firstWaveWith = id => { for (let n = 1; n <= 50; n++) if (id in OneTower.endlessWave(n).types) return n; };
+    eq(['goblin', 'wolf', 'orc', 'shaman'].map(firstWaveWith), [1, 3, 6, 10]);
+  });
+
+  // Waits for the current wave to walk in, then defeats it; returns what update reported along the way.
+  const clearWave = sim => {
+    const evs = [];
+    for (let i = 0; i < secs(60) && !(sim.enemies.length && !sim.queue.length && sim.enemies.every(e => e.spawnT <= 0)); i++) evs.push(step(sim, {}));
+    const size = sim.enemies.length;
+    sim.enemies.forEach(e => { e.hp = 0; });
+    evs.push(step(sim, {}));
+    return { evs, size };
+  };
+
+  test('otd endless: every spell, no upgrades, waves without end that follow the curve, cleared waves counted', () => {
+    const sim = OneTower.createEndless({ rng: seeded(3) });
+    eq(sim.spells, ALL);
+    eq(sim.stats, OneTower.stats([]));
+    for (let n = 1; n <= 30; n++) {
+      if (n > 1 && (n - 1) % D.endless.upgradeEvery === 0) sim.chooseUpgrade('boltDamage');
+      sim.tower.hp = sim.tower.maxHp = 1e6;   // only the waves are under test here
+      const { evs, size } = clearWave(sim);
+      const [min, max] = OneTower.endlessWave(n).perWave;
+      eq(size >= min && size <= max, true, 'wave ' + n + ' size ' + size);
+      eq(evs.includes('passed'), false, 'never passed');
+      eq(sim.wavesCleared, n);
+    }
+  });
+
+  test('otd endless: every 3 waves it stops for an upgrade, which applies at once and gives 5 health back', () => {
+    const sim = OneTower.createEndless({ rng: seeded(4) }), t = sim.tower;
+    const evs = [];
+    for (let n = 1; n <= D.endless.upgradeEvery; n++) { t.hp = t.maxHp; evs.push(...clearWave(sim).evs); }
+    eq(evs.filter(e => e === 'upgrade').length, 1, 'once, after the third wave');
+    eq(evs[evs.length - 1], 'upgrade');
+    const started = sim.waveIndex;
+    step(sim, {}, secs(10));
+    eq([sim.waveIndex, sim.enemies.length], [started, 0], 'no new wave while choosing');
+    t.hp = t.maxHp - 8;
+    sim.chooseUpgrade('fireballRadius');
+    eq(sim.stats.spells.fireball.radius, 26, 'applies at once');
+    eq(t.hp, t.maxHp - 8 + D.endless.heal, 'health back');
+    t.hp = t.maxHp - 1;
+    for (let n = 1; n <= D.endless.upgradeEvery; n++) { const keep = t.hp; clearWave(sim); t.hp = keep; }
+    sim.chooseUpgrade('towerHealth');
+    eq([t.maxHp, t.hp], [D.tower.hp + 5, D.tower.hp + 4], 'never above the maximum');
+    step(sim, {}, secs(D.waveDelay + 0.5));
+    eq(sim.waveIndex, started + D.endless.upgradeEvery + 1, 'play resumes');
+  });
 }
 
 // ---- report ----

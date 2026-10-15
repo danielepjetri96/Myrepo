@@ -9,6 +9,13 @@ const OneTower = {
   // Lists the enemy types of each wave for a level config ({ waves, perWave: [min, max], types: { id: weight }, boss }).
   buildWaves(cfg, rng) {
     rng = rng || Math.random;
+    const waves = Array.from({ length: cfg.waves }, () => OneTower.buildWave(cfg, rng));
+    if (cfg.boss) waves.push(['boss']);
+    return waves;
+  },
+
+  // The enemy types of one wave for { perWave: [min, max], types: { id: weight } }.
+  buildWave(cfg, rng) {
     const ids = Object.keys(cfg.types), total = ids.reduce((s, id) => s + cfg.types[id], 0);
     const pick = () => {
       let r = rng() * total;
@@ -16,9 +23,23 @@ const OneTower = {
       return ids[ids.length - 1];
     };
     const [min, max] = cfg.perWave;
-    const waves = Array.from({ length: cfg.waves }, () => Array.from({ length: min + Math.floor(rng() * (max - min + 1)) }, pick));
-    if (cfg.boss) waves.push(['boss']);
-    return waves;
+    return Array.from({ length: min + Math.floor(rng() * (max - min + 1)) }, pick);
+  },
+
+  // Endless: every spell, waves without end following endlessWave, an upgrade to choose every few waves.
+  // Never reports 'passed'; wavesCleared is the score.
+  createEndless({ rng }) {
+    rng = rng || Math.random;
+    return OneTower.create({ waves: i => OneTower.buildWave(OneTower.endlessWave(i + 1), rng), spells: OneTower.SPELLS, upgradeEvery: OneTowerData.endless.upgradeEvery, rng });
+  },
+
+  // Config of wave n (from 1) of the Endless: { perWave: [min, max], types: { id: weight } }.
+  endlessWave(n) {
+    const E = OneTowerData.endless, t = Math.min(1, (n - 1) / (E.rampWaves - 1));
+    const ease = (a, b) => Math.round(a + (b - a) * t);
+    const types = {};
+    for (const id in E.types) if (n >= E.types[id].from) types[id] = E.types[id].weight;
+    return { perWave: [ease(E.perWave.first[0], E.perWave.last[0]), ease(E.perWave.first[1], E.perWave.last[1])], types };
   },
 
   // The spells unlocked by the time level n (from 1) starts.
@@ -49,9 +70,13 @@ const OneTower = {
     return offer;
   },
 
-  // waves: lists of enemy types, one list per wave (see buildWaves). spells: the unlocked spells; upgrades: the ones taken.
-  create({ waves, spells = ['bolt'], upgrades = [], rng }) {
-    const D = OneTowerData, stats = OneTower.stats(upgrades), spellStats = stats.spells, B = spellStats.bolt;
+  // waves: lists of enemy types, one list per wave (see buildWaves), or a function giving the list of wave i (from 0) for
+  // waves without end. spells: the unlocked spells; upgrades: the ones taken.
+  // upgradeEvery: after every that many waves cleared, update reports 'upgrade' and the next wave waits for chooseUpgrade.
+  create({ waves, spells = ['bolt'], upgrades = [], upgradeEvery = 0, rng }) {
+    const waveAt = typeof waves === 'function' ? waves : i => waves[i];
+    upgrades = upgrades.slice();
+    const D = OneTowerData, stats = OneTower.stats(upgrades);
     rng = rng || Math.random;
     const sim = {
       tower: { x: OneTower.W / 2, y: OneTower.H / 2, size: stats.tower.size, hp: stats.tower.hp, maxHp: stats.tower.hp },
@@ -63,11 +88,14 @@ const OneTower = {
       fx: [],                 // { type: 'shoot' | 'cast' | 'deny' | 'blast' | 'hit' | 'kill' | 'hurt', x, y, ... }
       state: 'running',       // running | lost | passed
       waveIndex: 0,           // waves started so far
-      waveCount: waves.length,
+      waveCount: typeof waves === 'function' ? Infinity : waves.length,
+      wavesCleared: 0,
+      awaitingUpgrade: false, // paused between waves until chooseUpgrade
       waveTimer: D.firstWaveDelay,
       queue: [],              // enemy types of the current wave still to walk in
       spawnTimer: 0,
       stats,                  // spell and Torretta values with the upgrades applied (see stats)
+      upgrades,               // the upgrades taken (grows in the Endless)
       spells,                 // unlocked spells
       selected: 'bolt',
       firing: false,          // the button was held at the previous step
@@ -94,6 +122,16 @@ const OneTower = {
         return sim.updateWaves(dt);
       },
 
+      // Takes an upgrade in the middle of a run: its values apply at once, the Torretta gets some health back, play resumes.
+      chooseUpgrade(id) {
+        upgrades.push(id);
+        sim.stats = OneTower.stats(upgrades);
+        const t = sim.tower;
+        t.maxHp = sim.stats.tower.hp;
+        t.hp = Math.min(t.maxHp, t.hp + D.endless.heal);
+        sim.awaitingUpgrade = false;
+      },
+
       // Only an unlocked spell that is not recharging can be selected; the Bolt always can.
       select(id) {
         if (spells.includes(id) && (id === 'bolt' || sim.recharge[id] <= 0)) sim.selected = id;
@@ -104,11 +142,12 @@ const OneTower = {
       // pressed: the button has just gone down (a refusal is signalled only then, not while it is held).
       cast(id, x, y, pressed) {
         if (id === 'bolt') {   // the Bolt keeps a steady cadence instead of a full Ricarica
+          const B = sim.stats.spells.bolt;
           sim.recharge.bolt += 1 / B.fireRate;
           sim.effects.bolt(B, x, y);
           return;
         }
-        const S = spellStats[id];
+        const S = sim.stats.spells[id];
         if (sim.effects[id](S, x, y) === false) { if (pressed) sim.fx.push({ type: 'deny', x, y }); return; }   // nothing to cast on: keep it
         sim.recharge[id] = S.recharge;
         sim.selected = 'bolt';
@@ -182,20 +221,20 @@ const OneTower = {
       // Burning ground hurts what stands in it once a second.
       updateFires(dt) {
         for (const f of sim.fires) {
-          if (sim.tick(f.clock, dt)) for (const e of sim.active()) if (Math.hypot(e.x - f.x, e.y - f.y) <= f.radius) sim.hurt(e, spellStats.fireball.burn.dps);
+          if (sim.tick(f.clock, dt)) for (const e of sim.active()) if (Math.hypot(e.x - f.x, e.y - f.y) <= f.radius) sim.hurt(e, sim.stats.spells.fireball.burn.dps);
         }
         sim.fires = sim.fires.filter(f => f.clock.ticks > 0);
       },
 
       updateMeteors(dt) {
-        const M = spellStats.meteor;
+        const M = sim.stats.spells.meteor;
         for (const m of sim.meteors) { m.t -= dt; if (m.t <= 0) sim.blast(m.x, m.y, M.radius, M.damage); }
         sim.meteors = sim.meteors.filter(m => m.t > 0);
       },
 
       // A fireball explodes on the first enemy it touches, or when it reaches the click point.
       updateFireballs(dt) {
-        const F = spellStats.fireball;
+        const F = sim.stats.spells.fireball;
         for (const f of sim.fireballs) {
           const step = Math.min(F.speed * dt, f.left), s = step / F.speed;
           f.x += f.vx * s; f.y += f.vy * s; f.left -= step;
@@ -208,6 +247,7 @@ const OneTower = {
       },
 
       updateBolts(dt) {
+        const B = sim.stats.spells.bolt;
         for (const b of sim.bolts) {
           b.x += b.vx * dt; b.y += b.vy * dt;
           if (b.x < 0 || b.x > OneTower.W || b.y < 0 || b.y > OneTower.H) { b.dead = true; continue; }
@@ -238,7 +278,7 @@ const OneTower = {
           }
           e.slowT = Math.max(0, e.slowT - dt);
           if (e.chill && sim.tick(e.chill, dt)) {   // a hurting Frost: 1 hit a second while it lasts
-            sim.hurt(e, spellStats.frost.dps);
+            sim.hurt(e, sim.stats.spells.frost.dps);
             if (e.chill.ticks <= 0) e.chill = null;
           }
           if (e.hp <= 0) continue;
@@ -269,10 +309,15 @@ const OneTower = {
           return null;
         }
         if (sim.enemies.length > 0) return null;
-        if (sim.waveIndex >= waves.length) { sim.state = 'passed'; return 'passed'; }
+        if (sim.wavesCleared < sim.waveIndex) {   // the wave just started is defeated
+          sim.wavesCleared++;
+          if (upgradeEvery && sim.wavesCleared % upgradeEvery === 0) { sim.awaitingUpgrade = true; return 'upgrade'; }
+        }
+        if (sim.awaitingUpgrade) return null;
+        if (sim.waveIndex >= sim.waveCount) { sim.state = 'passed'; return 'passed'; }
         sim.waveTimer -= dt;
         if (sim.waveTimer <= 0) {
-          sim.queue = waves[sim.waveIndex++].slice();
+          sim.queue = waveAt(sim.waveIndex++).slice();
           sim.spawnTimer = 0; sim.waveTimer = D.waveDelay;
         }
         return null;

@@ -69,6 +69,22 @@ const OneTowerData = {
     { waves: 6, perWave: [8, 12], types: { goblin: 3, wolf: 3, orc: 2, shaman: 2 },    spell: 'meteor', boss: true },
   ],
 
+  // Endless: every spell from the start, no upgrades, one life. Wave n eases from the `first` size to the `last` one,
+  // reached at wave `rampWaves` and kept from then on; a type joins at wave `from` with spawn weight `weight`.
+  // Every `upgradeEvery` waves cleared the player picks an upgrade, which also gives back `heal` health.
+  endless: {
+    rampWaves: 25,
+    perWave: { first: [4, 5], last: [12, 15] },
+    types: {
+      goblin: { from: 1,  weight: 3 },
+      wolf:   { from: 3,  weight: 3 },
+      orc:    { from: 6,  weight: 2 },
+      shaman: { from: 10, weight: 2 },
+    },
+    upgradeEvery: 3,
+    heal: 5,
+  },
+
   firstWaveDelay: 1,    // s before the first wave of a level
   waveDelay: 3,         // s between a defeated wave and the next one
   spawnEvery: 0.7,      // s between two enemies of the same wave
