@@ -151,7 +151,7 @@ const MENU = [
   { kind: 'chapter', i: 2 },
   { kind: 'endless', id: 'onetowerdefense', name: 'ONE TOWER DEFENSE ENDLESS', indent: 12 },
 ];
-const CARD = i => ({ x: 40, y: 45 + i * 20, w: 240, h: 18 });
+const CARD = i => ({ x: 10, y: 40 + i * 20, w: 182, h: 18 });
 const inRect = (p, r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
 
 function activateItem(i) {
@@ -168,8 +168,8 @@ function activateItem(i) {
 
 // Clickable buttons: rectangles shared by update (hit-testing) and draw.
 const BTN = {
-  sound: { x: 40, y: 166, w: 112, h: 12 },
-  reset: { x: 168, y: 166, w: 112, h: 12 },
+  sound: { x: 10, y: 164, w: 82, h: 13 },
+  reset: { x: 98, y: 164, w: 94, h: 13 },
   resume: { x: 90, y: 84, w: 140, h: 16 },
   pauseSound: { x: 90, y: 106, w: 140, h: 16 },
   quit: { x: 90, y: 128, w: 140, h: 16 },
@@ -889,29 +889,48 @@ function drawUpgradeChoice() {
   c.labels.forEach((name, i) => button(upgradeButton(i), (i + 1) + '  ' + name, COLORS.blue));
 }
 
+// A slab of castle stone: dark outline, light top edge, shaded bottom, faint bricks. fill: the stone's color.
+function stone(x, y, w, h, fill) {
+  ctx.fillStyle = COLORS.black; ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+  ctx.fillStyle = fill; ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = withAlpha(COLORS.black, 0.18);
+  for (let r = y + 6; r < y + h - 2; r += 7) {
+    ctx.fillRect(x + 1, r, w - 2, 1);
+    for (let c = x + ((r - y) % 14 ? 9 : 20); c < x + w - 2; c += 22) ctx.fillRect(c, r - 6, 1, 6);
+  }
+  ctx.fillStyle = withAlpha(COLORS.white, 0.25); ctx.fillRect(x, y, w, 1); ctx.fillRect(x, y, 1, h);
+  ctx.fillStyle = withAlpha(COLORS.black, 0.35); ctx.fillRect(x, y + h - 1, w, 1); ctx.fillRect(x + w - 1, y, 1, h);
+}
+
+// A screen over the game: the game darkened behind a stone panel with a title and lines of text.
 function panel(title, lines, color) {
-  ctx.fillStyle = withAlpha(COLORS.black, 0.65); ctx.fillRect(0, 0, W, H);
-  text(title, W / 2, 50, color, 20, 'center');
+  ctx.fillStyle = withAlpha(COLORS.black, 0.5); ctx.fillRect(0, 0, W, H);
+  stone(24, 20, W - 48, H - 32, COLORS.slate);
+  const big = PixelFont.width(title) * 3 <= W - 64;   // a long title is drawn smaller to fit the panel
+  text(title, W / 2, big ? 34 : 38, color, big ? 20 : 16, 'center');
   lines.forEach((l, i) => text(l, W / 2, 96 + i * 14, COLORS.white, 8, 'center'));
 }
 
 function button(r, label, color) {
-  ctx.fillStyle = COLORS.black; ctx.fillRect(r.x - 1, r.y - 1, r.w + 2, r.h + 2);
-  ctx.fillStyle = color || COLORS.slate; ctx.fillRect(r.x, r.y, r.w, r.h);
-  text(label, r.x + r.w / 2, r.y + (r.h - 8) / 2 + 1, COLORS.white, 8, 'center');
+  stone(r.x, r.y, r.w, r.h, color || COLORS.grey);
+  text(label, r.x + r.w / 2, r.y + Math.floor((r.h - 7) / 2), COLORS.white, 8, 'center');
 }
 
+// The menu: the journey (the Mago running toward the castle across the countryside) behind a column of stone cards.
 function drawMenu() {
-  drawBackground(sceneTime * 40, castleNearness()); drawGround(sceneTime * 40);
-  text('GtJ', W / 2, 8, COLORS.yellow, 26, 'center');
-  text('CHOOSE WHAT TO PLAY', W / 2, 36, COLORS.white, 8, 'center');
+  const run = sceneTime * 40;
+  drawBackground(run, 0.55); drawGround(run);
+  drawMage(232, JumpGuy.GROUND - MAGE_H, 'run', run / 90);
+  text('GtJ', 252, 6, COLORS.yellow, 26, 'center');
+  text('A JOURNEY IN 3 CHAPTERS', 252, 30, COLORS.white, 8, 'center');
+  text('CHOOSE WHAT TO PLAY', 12, 28, COLORS.white, 8);
   MENU.forEach((item, i) => {
     const r = CARD(i);
     let title, sub, unlocked;
     if (item.kind === 'endless') {
       unlocked = progression.isEndlessUnlocked(item.id);
       title = item.name;
-      sub = unlocked ? 'BEST: ' + progression.record(item.id) + ENDLESS[item.id].unit : 'LOCKED - COMPLETE ' + CHAPTERS.find(c => c.id === item.id).name;
+      sub = unlocked ? 'BEST: ' + progression.record(item.id) + ENDLESS[item.id].unit : 'LOCKED - FINISH CHAPTER ' + (CHAPTERS.findIndex(c => c.id === item.id) + 1);
     } else {
       const c = CHAPTERS[item.i];
       unlocked = progression.isChapterUnlocked(c.id);
@@ -922,11 +941,12 @@ function drawMenu() {
       else if (progression.run && progression.run.chapter === c.id) sub = 'CONTINUE - LEVEL ' + progression.run.level + ', ' + progression.run.lives + ' LIVES';
       else sub = 'NEW GAME';
     }
-    ctx.fillStyle = i === menuIndex && unlocked ? COLORS.yellow : COLORS.black; ctx.fillRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
-    ctx.fillStyle = unlocked ? COLORS.blue : COLORS.slate; ctx.fillRect(r.x, r.y, r.w, r.h);
+    const selected = i === menuIndex && unlocked;
+    stone(r.x, r.y, r.w, r.h, !unlocked ? COLORS.slate : selected ? COLORS.blue : COLORS.grey);
+    if (selected) { ctx.strokeStyle = COLORS.yellow; ctx.strokeRect(r.x - 1.5, r.y - 1.5, r.w + 3, r.h + 3); }
     const ix = item.indent || 0;
-    text(title, r.x + 8 + ix, r.y + 1, unlocked ? COLORS.white : COLORS.silver, 8);
-    text(sub, r.x + 8 + ix, r.y + 10, unlocked ? COLORS.lime : COLORS.silver, 8);
+    text(title, r.x + 6 + ix, r.y + 2, unlocked ? COLORS.white : COLORS.silver, 8);
+    text(sub, r.x + 6 + ix, r.y + 10, unlocked ? COLORS.lime : COLORS.silver, 8);
   });
   button(BTN.sound, soundLabel());
   button(BTN.reset, 'R  RESET PROGRESS');
@@ -942,7 +962,6 @@ function draw() {
   else PLAY[chapterId].draw();
   ctx.restore();
   if (scene === 'confirm') {
-    ctx.fillStyle = COLORS.black; ctx.fillRect(0, 0, W, H);
     panel('RESET PROGRESS?', ['ALL UNLOCKS, RECORDS AND SAVED LEVELS', 'WILL BE ERASED. SOUND SETTING IS KEPT.'], COLORS.red);
     button(BTN.yes, 'Y  YES, RESET', COLORS.red); button(BTN.no, 'N  CANCEL');
     return;
