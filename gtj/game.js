@@ -450,36 +450,77 @@ function drawMageDeath(x, y, t) {
 const SPIKE = ['...#...', '..###..', '..###..', '.#####.', '.#####.', '#######', '#######'];
 const HEART = ['.rr.rr.', 'rrrrrrr', 'rrrrrrr', '.rrrrr.', '..rrr..', '...r...'];
 
-function drawBackground(dist) {
-  ctx.fillStyle = COLORS.navy; ctx.fillRect(0, 0, W, 70);
-  ctx.fillStyle = COLORS.blue; ctx.fillRect(0, 70, W, 40);
-  ctx.fillStyle = COLORS.sky; ctx.fillRect(0, 110, W, 30);
-  // two hill layers with parallax, drawn as 3px columns
+// A small deterministic noise in [0, 1) for scenery details that must not flicker from frame to frame.
+const hash = (i, j) => { const v = Math.sin(i * 127.1 + j * 311.7) * 43758.5453; return v - Math.floor(v); };
+
+// The countryside by day. dist scrolls the scenery; castle (0..1) is how close the castle on the horizon is.
+function drawBackground(dist, castle) {
+  const G = JumpGuy.GROUND, horizon = G - 30;
+  // sky in bands, lighter toward the horizon, with the sun
+  const bands = [COLORS.blue, COLORS.sky, COLORS.cyan];
+  bands.forEach((c, i) => { ctx.fillStyle = c; ctx.fillRect(0, Math.round(i * horizon / 3), W, Math.ceil(horizon / 3) + 1); });
+  ctx.fillStyle = COLORS.white; ctx.beginPath(); ctx.arc(52, 34, 11, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = COLORS.yellow; ctx.beginPath(); ctx.arc(52, 34, 9, 0, Math.PI * 2); ctx.fill();
+  // clouds drifting slowly
+  ctx.fillStyle = COLORS.white;
+  for (let k = 0; k < 4; k++) {
+    const cx = ((k * 97 - dist * 0.05) % (W + 60) + W + 60) % (W + 60) - 30, cy = 14 + (k % 2) * 16 + k * 3;
+    ctx.fillRect(Math.round(cx), cy, 22, 4); ctx.fillRect(Math.round(cx) + 4, cy - 3, 12, 3); ctx.fillRect(Math.round(cx) + 3, cy + 4, 16, 2);
+  }
+  drawCastle(236, horizon + 6, castle);
+  // two hill layers with parallax, one pixel wide columns
   for (let layer = 0; layer < 2; layer++) {
-    const speed = layer ? 0.5 : 0.2, height = layer ? 26 : 38, base = JumpGuy.GROUND - (layer ? 0 : 14);
+    const speed = layer ? 0.5 : 0.2, height = layer ? 22 : 34, base = G - (layer ? 0 : 10);
     const off = (dist * speed) % 160;
-    ctx.fillStyle = layer ? COLORS.green : COLORS.teal;
-    for (let x = -160; x < W + 160; x += 80) {
-      const hx = x - off + (layer ? 40 : 0);
-      for (let i = 0; i < 30; i++) {
-        const t = i / 29, hh = Math.round(Math.sin(t * Math.PI) * height);
-        ctx.fillRect(Math.round(hx + t * 80), base - hh, 3, hh);
-      }
+    for (let x = 0; x < W; x++) {
+      const t = ((x + off + (layer ? 40 : 0)) % 80) / 80, hh = Math.round(Math.sin(t * Math.PI) * height);
+      ctx.fillStyle = layer ? COLORS.green : COLORS.teal; ctx.fillRect(x, base - hh, 1, hh);
+      if (layer && hh > 2) { ctx.fillStyle = COLORS.lime; ctx.fillRect(x, base - hh, 1, 1); }   // sunlit rim
     }
   }
 }
+
+// The castle on the horizon, base centered at (cx, base); near (0..1) makes it bigger as the journey goes on.
+function drawCastle(cx, base, near) {
+  const k = 1 + Math.round(near * 2);   // its size grows in whole steps so the pixels stay crisp
+  const w = 22 * k, h = 12 * k, x0 = Math.round(cx - w / 2);
+  ctx.fillStyle = COLORS.grey; ctx.fillRect(x0, base - h, w, h);   // the wall
+  for (let x = x0; x < x0 + w; x += 4 * k) ctx.fillRect(x, base - h - 2 * k, 2 * k, 2 * k);   // battlements
+  for (const tx of [x0 - 2 * k, x0 + w - 4 * k, x0 + w / 2 - 3 * k]) {   // three towers with pointed roofs
+    const th = tx === x0 + w / 2 - 3 * k ? h + 10 * k : h + 6 * k, tw = 6 * k;
+    ctx.fillStyle = COLORS.grey; ctx.fillRect(Math.round(tx), base - th, tw, th);
+    ctx.fillStyle = COLORS.red;   // the roof narrows to a point
+    for (let r = 0; r < 4 * k; r++) { const inset = Math.round((4 * k - 1 - r) * tw / (8 * k)); ctx.fillRect(Math.round(tx) + inset, base - th - 4 * k + r, Math.max(1, tw - 2 * inset), 1); }
+    ctx.fillStyle = COLORS.black; ctx.fillRect(Math.round(tx + tw / 2) - Math.ceil(k / 2), base - th + 2 * k, Math.max(1, k), 2 * k);   // a window
+  }
+  ctx.fillStyle = COLORS.slate; ctx.fillRect(Math.round(cx) - 2 * k, base - 5 * k, 4 * k, 5 * k);   // the gate
+}
+
+// The meadow the Mago runs on: grass with tufts scrolling at the run speed.
 function drawGround(dist) {
   const g = JumpGuy.GROUND;
-  ctx.fillStyle = COLORS.grey; ctx.fillRect(0, g, W, H - g);
-  ctx.fillStyle = COLORS.cyan; ctx.fillRect(0, g, W, 2);
-  ctx.fillStyle = COLORS.slate;
-  const off = Math.floor(dist) % 16;
-  for (let x = -off; x < W; x += 16) { ctx.fillRect(x, g + 10, 8, 2); ctx.fillRect(x + 8, g + 24, 8, 2); }
+  ctx.fillStyle = COLORS.green; ctx.fillRect(0, g, W, H - g);
+  ctx.fillStyle = COLORS.lime; ctx.fillRect(0, g, W, 2);
+  ctx.fillStyle = COLORS.teal;
+  const off = Math.floor(dist) % 24;
+  for (let x = -off; x < W; x += 24) {
+    ctx.fillRect(x + 3, g + 9, 1, 2); ctx.fillRect(x + 5, g + 8, 1, 3);
+    ctx.fillRect(x + 15, g + 22, 1, 2); ctx.fillRect(x + 17, g + 21, 1, 3);
+    ctx.fillRect(x + 9, g + 32, 2, 1);
+  }
+}
+
+// How close the castle is in Jump Guy: the level reached plus the way run in it (and, in the Endless, the metres).
+function castleNearness() {
+  if (scene === 'menu' || scene === 'confirm') return 0.34;
+  if (mode === 'endless') return Math.min(1, sim.dist / 30000);
+  const levels = JumpGuyData.levels.length, run = Math.min(1, sim.dist / sim.def.length);
+  return Math.min(1, (hud.level - 1 + run) / levels);
 }
 
 function drawLevel() {
   const J = JumpGuy;
-  drawBackground(sim.dist);
+  drawBackground(sim.dist, castleNearness());
   drawGround(sim.dist);
   const fx = Math.round(sim.def.length - sim.dist);
   if (fx > -30 && fx < W + 20) {
@@ -508,19 +549,6 @@ const ENEMY_ART = {
   boss: { c: COLORS.red, e: COLORS.yellow, rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccccccccccccc', 'ccceeccceeccc', 'ccceeccceeccc', 'ccccccccccccc', 'cccc.....cccc', 'ccccc...ccccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
 };
 
-const TOWER = [
-  '....bb....',
-  '...bbbb...',
-  '..bbbbbb..',
-  '.wwwwwwww.',
-  '.w.ww.ww.w',
-  '.wwwwwwww.',
-  '.wwgwwgww.',
-  '.wwwwwwww.',
-  '.wwwddwww.',
-  '.wwwddwww.',
-  'wwwwddwwww',
-];
 // One Tower Defense art: pixel rows drawn at 2x, centered on the enemy. Letter c is the body color, e the eyes.
 const FIELD_ART = {
   goblin: { c: COLORS.green, rows: ['c......c', '.cccccc.', 'cceccecc', '.cccccc.', '..cccc..', '.cc..cc.'] },
@@ -532,15 +560,48 @@ const FIELD_ART = {
 
 function ring(x, y, r, color) { ctx.strokeStyle = color; ctx.beginPath(); ctx.arc(Math.round(x), Math.round(y), r, 0, Math.PI * 2); ctx.stroke(); }
 
+// The courtyard of the tower at sunset: paving stones in warm light, the sky and the battlements along the top.
+function drawCourtyard() {
+  ctx.fillStyle = COLORS.slate; ctx.fillRect(0, 0, W, H);
+  for (let j = 0; j < H / 12; j++) for (let i = -1; i < W / 16 + 1; i++) {   // paving: offset rows of stones
+    const x = i * 16 + (j % 2) * 8, y = j * 12;
+    ctx.fillStyle = hash(i, j) < 0.12 ? COLORS.grey : COLORS.slate; ctx.fillRect(x + 1, y + 1, 15, 11);   // mostly dark, so enemies stand out
+    ctx.fillStyle = COLORS.purple; ctx.fillRect(x, y, 16, 1); ctx.fillRect(x, y, 1, 12);
+    if (hash(j, i) < 0.12) { ctx.fillStyle = COLORS.green; ctx.fillRect(x + 4, y + 10, 1, 2); ctx.fillRect(x + 6, y + 9, 1, 3); ctx.fillRect(x + 8, y + 10, 1, 2); }
+  }
+  ctx.fillStyle = withAlpha(COLORS.orange, 0.12); ctx.fillRect(0, 0, W, H);   // the warm light of the sunset
+  // the sky over the wall: purple to orange, the sun going down
+  [COLORS.purple, COLORS.red, COLORS.orange].forEach((c, k) => { ctx.fillStyle = c; ctx.fillRect(0, k * 7, W, 7); });
+  ctx.fillStyle = COLORS.yellow; ctx.beginPath(); ctx.arc(250, 21, 8, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = COLORS.grey; ctx.fillRect(0, 21, W, 7);   // the wall walk, with its battlements
+  for (let x = 0; x < W; x += 10) ctx.fillRect(x, 17, 6, 4);
+  ctx.fillStyle = COLORS.slate; ctx.fillRect(0, 27, W, 1);
+}
+
+// The Torretta, seen from the front: a stone tower with battlements on top (where the Mago stands), a window and a door.
+function drawTowerBody(t) {
+  const x0 = Math.round(t.x - 12), top = Math.round(t.y - 13), bottom = Math.round(t.y + 12);
+  ctx.fillStyle = withAlpha(COLORS.black, 0.35); ctx.beginPath(); ctx.ellipse(t.x + 3, bottom + 1, 15, 5, 0, 0, Math.PI * 2); ctx.fill();   // its shadow
+  ctx.fillStyle = COLORS.silver; ctx.fillRect(x0, top, 24, bottom - top);
+  ctx.fillStyle = COLORS.grey;   // bricks
+  for (let y = top + 3; y < bottom; y += 4) {
+    ctx.fillRect(x0, y, 24, 1);
+    for (let x = x0 + ((y - top) % 8 ? 2 : 6); x < x0 + 24; x += 8) ctx.fillRect(x, y - 3, 1, 3);
+  }
+  ctx.fillStyle = COLORS.grey; ctx.fillRect(x0 + 18, top, 6, bottom - top);   // the shaded side
+  ctx.fillStyle = COLORS.silver; for (let x = x0 - 1; x < x0 + 24; x += 6) ctx.fillRect(x, top - 4, 4, 4);   // battlements
+  ctx.fillStyle = COLORS.black; ctx.fillRect(x0 + 10, top + 6, 3, 5);   // window
+  ctx.fillStyle = COLORS.red; ctx.fillRect(x0 + 8, bottom - 9, 7, 9);   // door
+  ctx.fillStyle = COLORS.orange; ctx.fillRect(x0 + 9, bottom - 8, 2, 8); ctx.fillRect(x0 + 12, bottom - 8, 2, 8);
+}
+
 function drawField() {
-  ctx.fillStyle = COLORS.green; ctx.fillRect(0, 0, W, H);
-  for (let j = 0; j < H; j += 12) for (let i = (j / 12) % 2 * 6; i < W; i += 12) { ctx.fillStyle = COLORS.teal; ctx.fillRect(i, j, 2, 2); }
+  drawCourtyard();
   // burning ground and falling meteors (a blinking circle where it will land)
   for (const f of sim.fires) { ctx.fillStyle = withAlpha(COLORS.orange, 0.35); ctx.beginPath(); ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2); ctx.fill(); }
   for (const m of sim.meteors) if (Math.floor(m.t * 10) % 2 === 0) ring(m.x, m.y, sim.stats.spells.meteor.radius, COLORS.red);
   const t = sim.tower;
-  ctx.fillStyle = COLORS.grey; ctx.fillRect(t.x - t.size / 2 - 2, t.y - t.size / 2 - 2, t.size + 4, t.size + 4);   // the ground the enemies stop at
-  pixels(TOWER, { b: COLORS.blue, w: COLORS.silver, g: COLORS.black, d: COLORS.red }, Math.round(t.x - 15), Math.round(t.y - 22), 3);
+  drawTowerBody(t);
   const mx = t.x - MAGE_W / 2, my = t.y - 13 - MAGE_H;   // standing on the battlements
   if (scene === 'dying') drawMageDeath(mx, my, sceneTime);
   else drawMage(mx, my, mageCastT > 0 ? 'cast' : 'idle', sceneTime, mouse.x < t.x);
@@ -582,28 +643,58 @@ function drawField() {
   text(sim.selected.toUpperCase(), W / 2, H - 25, COLORS.white, 8, 'center');
 }
 
+// Dungeon floor: big stone slabs with dark joints and a few cracks.
+function drawFloorTile(x, y, i, j) {
+  ctx.fillStyle = COLORS.navy; ctx.fillRect(x, y, 20, 20);
+  ctx.fillStyle = COLORS.black;
+  ctx.fillRect(x, y + 9, 20, 1); ctx.fillRect(x + (j % 2 ? 4 : 14), y, 1, 9); ctx.fillRect(x + (j % 2 ? 14 : 4), y + 10, 1, 10);
+  if (hash(i, j) < 0.3) { ctx.fillStyle = COLORS.slate; ctx.fillRect(x + 6, y + 13, 3, 1); ctx.fillRect(x + 8, y + 14, 2, 1); }
+}
+// Castle wall: grey bricks lit from the top.
+function drawWallTile(x, y, i, j) {
+  ctx.fillStyle = COLORS.grey; ctx.fillRect(x, y, 20, 20);
+  ctx.fillStyle = COLORS.slate;
+  for (let r = 0; r < 4; r++) {
+    ctx.fillRect(x, y + r * 5 + 4, 20, 1);
+    ctx.fillRect(x + ((r + j) % 2 ? 4 : 14), y + r * 5, 1, 4);
+  }
+  ctx.fillStyle = COLORS.silver; ctx.fillRect(x, y, 20, 1);
+}
+// A door of the castle: wooden planks with iron bands while closed, a dark archway once open.
+function drawDoorTile(x, y, closed) {
+  if (closed) {
+    ctx.fillStyle = COLORS.red; ctx.fillRect(x, y, 20, 20);
+    ctx.fillStyle = COLORS.orange; for (let k = 0; k < 4; k++) ctx.fillRect(x + 1 + k * 5, y + 1, 3, 18);
+    ctx.fillStyle = COLORS.black; ctx.fillRect(x, y + 5, 20, 2); ctx.fillRect(x, y + 13, 20, 2);
+  } else {
+    ctx.fillStyle = COLORS.black; ctx.fillRect(x, y, 20, 20);
+    ctx.fillStyle = COLORS.slate; ctx.fillRect(x, y, 20, 2);
+  }
+}
+// A torch on a wall: a wooden stick, a flickering flame and a warm glow on the floor below. seed varies the flicker.
+function drawTorch(x, y, seed) {
+  const f = Math.floor(sceneTime * 8 + seed) % 3;
+  ctx.fillStyle = withAlpha(COLORS.yellow, 0.07); ctx.beginPath(); ctx.arc(x, y + 10, 24, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = COLORS.orange; ctx.fillRect(x - 1, y, 2, 5);
+  ctx.fillStyle = COLORS.red; ctx.fillRect(x - 2, y - 3 - (f === 1 ? 1 : 0), 4, 3);
+  ctx.fillStyle = COLORS.yellow; ctx.fillRect(x - 1, y - 4 - f % 2, 2, 3);
+  ctx.fillStyle = COLORS.white; ctx.fillRect(x - (f === 2 ? 1 : 0), y - 2, 1, 1);
+}
+
 function drawRoom() {
   const cam = camera(), r = sim.room, T = ClearTheRoom.TILE;
   ctx.fillStyle = COLORS.black; ctx.fillRect(0, 0, W, H);
   const i0 = Math.floor(cam.x / T), i1 = Math.ceil((cam.x + W) / T), j0 = Math.floor(cam.y / T), j1 = Math.ceil((cam.y + H) / T);
   for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
     const x = Math.round(i * T - cam.x), y = Math.round(j * T - cam.y);
-    if (r.inDoor(x + cam.x + 1, y + cam.y + 1)) {
-      if (r.solid[j][i]) { // closed door
-        ctx.fillStyle = COLORS.red; ctx.fillRect(x, y, T, T);
-        ctx.fillStyle = COLORS.orange; ctx.fillRect(x + 2, y + 2, T - 4, T - 4);
-        ctx.fillStyle = COLORS.red; ctx.fillRect(x + 8, y + 2, 4, T - 4);
-      } else {            // open door
-        ctx.fillStyle = COLORS.black; ctx.fillRect(x, y, T, T);
-        ctx.fillStyle = COLORS.lime; ctx.fillRect(x + 8, y + 8, 4, 4);
-      }
-    } else if (r.solid[j] && r.solid[j][i]) {
-      ctx.fillStyle = COLORS.grey; ctx.fillRect(x, y, T, T);
-      ctx.fillStyle = COLORS.silver; ctx.fillRect(x, y, T, 2);
-      ctx.fillStyle = COLORS.slate; ctx.fillRect(x, y + T - 3, T, 3);
-    } else {
-      ctx.fillStyle = (i + j) % 2 ? COLORS.navy : COLORS.slate; ctx.fillRect(x, y, T, T);
-    }
+    if (r.inDoor(x + cam.x + 1, y + cam.y + 1)) drawDoorTile(x, y, r.solid[j][i]);
+    else if (r.solid[j] && r.solid[j][i]) drawWallTile(x, y, i, j);
+    else drawFloorTile(x, y, i, j);
+  }
+  // torches on the walls facing the room, each lighting a patch of floor
+  for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
+    if (!(r.solid[j] && r.solid[j][i]) || r.inDoor(i * T + 1, j * T + 1) || !(r.solid[j + 1] && r.solid[j + 1][i] === false) || hash(i, j) > 0.22) continue;
+    drawTorch(Math.round(i * T - cam.x) + T / 2, Math.round(j * T - cam.y) + T - 6, i + j);
   }
   // enemies (blinking outline while they spawn)
   for (const e of sim.enemies) {
@@ -638,7 +729,7 @@ function drawRoom() {
 
 function drawLives() {
   const c = PLAY[chapterId];
-  if (c.hearts) for (let i = 0; i < sim.player.maxHp; i++) pixels(HEART, { r: i < sim.player.hp ? COLORS.red : COLORS.slate }, 6 + i * 10, 5);
+  if (c.hearts) for (let i = 0; i < sim.player.maxHp; i++) hudHeart(6 + i * 10, 5, i < sim.player.hp);
   if (mode === 'endless') {
     const e = ENDLESS[chapterId];
     text('ONE LIFE', 6, c.hearts ? 16 : 6, COLORS.white, 8);
@@ -649,10 +740,15 @@ function drawLives() {
   }
   c.hud();
 }
+// A heart of the HUD, full or empty, with a dark shadow like the text so it reads on any background.
+function hudHeart(x, y, full) {
+  pixels(HEART, { r: COLORS.black }, x + 1, y + 1);
+  pixels(HEART, { r: full ? COLORS.red : COLORS.slate }, x, y);
+}
 const drawLevelCount = () => text('LEVEL ' + hud.level + '/' + CHAPTERS.find(c => c.id === chapterId).levels, W - 6, 6, COLORS.white, 8, 'right');
 function drawLivesAndLevel() {
   text('LIVES', 6, 6, COLORS.white, 8);
-  for (let i = 0; i < Progression.LIVES; i++) pixels(HEART, { r: i < hud.lives ? COLORS.red : COLORS.slate }, 46 + i * 10, 5);
+  for (let i = 0; i < Progression.LIVES; i++) hudHeart(46 + i * 10, 5, i < hud.lives);
   drawLevelCount();
 }
 function drawRoomHud() {
@@ -715,7 +811,7 @@ function button(r, label, color) {
 }
 
 function drawMenu() {
-  drawBackground(sceneTime * 40); drawGround(sceneTime * 40);
+  drawBackground(sceneTime * 40, castleNearness()); drawGround(sceneTime * 40);
   text('GtJ', W / 2, 8, COLORS.yellow, 26, 'center');
   text('CHOOSE WHAT TO PLAY', W / 2, 36, COLORS.white, 8, 'center');
   MENU.forEach((item, i) => {
