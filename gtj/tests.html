@@ -63,7 +63,7 @@ test('at the start only the first chapter is unlocked', () => {
 test('starting a chapter gives level 1 and 3 lives', () => {
   const p = fresh();
   eq(p.startChapter('a'), true);
-  eq(p.run, { chapter: 'a', level: 1, lives: 3 });
+  eq(p.run, { chapter: 'a', level: 1, lives: 3, upgrades: [] });
 });
 
 test('a locked chapter cannot be started', () => {
@@ -76,16 +76,16 @@ test('passing a level moves to the next one', () => {
   const p = fresh();
   p.startChapter('a');
   eq(p.levelPassed(), { chapterCompleted: false });
-  eq(p.run, { chapter: 'a', level: 2, lives: 3 });
+  eq(p.run, { chapter: 'a', level: 2, lives: 3, upgrades: [] });
 });
 
 test('losing a life keeps the level and lives are not refilled by the next level', () => {
   const p = fresh();
   p.startChapter('a');
   eq(p.lifeLost(), { gameOver: false });
-  eq(p.run, { chapter: 'a', level: 1, lives: 2 });
+  eq(p.run, { chapter: 'a', level: 1, lives: 2, upgrades: [] });
   p.levelPassed();
-  eq(p.run, { chapter: 'a', level: 2, lives: 2 });
+  eq(p.run, { chapter: 'a', level: 2, lives: 2, upgrades: [] });
 });
 
 test('losing the last life restarts the chapter from level 1 with 3 lives', () => {
@@ -95,7 +95,7 @@ test('losing the last life restarts the chapter from level 1 with 3 lives', () =
   p.lifeLost();
   p.lifeLost();
   eq(p.lifeLost(), { gameOver: true });
-  eq(p.run, { chapter: 'a', level: 1, lives: 3 });
+  eq(p.run, { chapter: 'a', level: 1, lives: 3, upgrades: [] });
 });
 
 function complete(p, id, levels) {
@@ -138,7 +138,7 @@ test('a completed chapter can be replayed from level 1 without losing unlocks', 
   const p = fresh();
   complete(p, 'a', 3);
   eq(p.startChapter('a'), true);
-  eq(p.run, { chapter: 'a', level: 1, lives: 3 });
+  eq(p.run, { chapter: 'a', level: 1, lives: 3, upgrades: [] });
   p.lifeLost(); p.lifeLost(); p.lifeLost();
   eq(p.isChapterUnlocked('b'), true);
   eq(p.isEndlessUnlocked('a'), true);
@@ -180,7 +180,7 @@ test('a reloaded game resumes at the saved level and lives', () => {
   p.startChapter('b');
   p.lifeLost();
   const q = fresh(s);
-  eq(q.run, { chapter: 'b', level: 1, lives: 2 });
+  eq(q.run, { chapter: 'b', level: 1, lives: 2, upgrades: [] });
   eq(q.isChapterCompleted('a'), true);
   eq(q.isChapterUnlocked('b'), true);
   eq(q.record('a'), 42);
@@ -191,7 +191,7 @@ test('a reloaded game remembers a level passed mid-chapter', () => {
   const p = fresh(s);
   p.startChapter('a');
   p.levelPassed();
-  eq(fresh(s).run, { chapter: 'a', level: 2, lives: 3 });
+  eq(fresh(s).run, { chapter: 'a', level: 2, lives: 3, upgrades: [] });
 });
 
 test('a game over is saved as a fresh attempt at level 1', () => {
@@ -200,7 +200,7 @@ test('a game over is saved as a fresh attempt at level 1', () => {
   p.startChapter('a');
   p.levelPassed();
   p.lifeLost(); p.lifeLost(); p.lifeLost();
-  eq(fresh(s).run, { chapter: 'a', level: 1, lives: 3 });
+  eq(fresh(s).run, { chapter: 'a', level: 1, lives: 3, upgrades: [] });
 });
 
 test('reset returns to the initial state, also after reload', () => {
@@ -242,7 +242,7 @@ test('nonsense values inside a readable save are discarded', () => {
     v: 1,
     completed: ['zzz', 'b'],            // unknown chapter, and b without a completed
     records: { a: -5, b: 'x', zzz: 9 },
-    run: { chapter: 'c', level: 1, lives: 3 }, // c is locked
+    run: { chapter: 'c', level: 1, lives: 3, upgrades: [] }, // c is locked
   };
   const p = fresh(fakeStorage({ [Progression.KEY]: JSON.stringify(save) }));
   eq(p.run, null);
@@ -253,9 +253,9 @@ test('nonsense values inside a readable save are discarded', () => {
 test('a saved run with out-of-range level or lives is discarded', () => {
   for (const run of [
     { chapter: 'a', level: 99, lives: 3 },
-    { chapter: 'a', level: 0, lives: 3 },
-    { chapter: 'a', level: 1, lives: 0 },
-    { chapter: 'a', level: 1, lives: 9 },
+    { chapter: 'a', level: 0, lives: 3, upgrades: [] },
+    { chapter: 'a', level: 1, lives: 0, upgrades: [] },
+    { chapter: 'a', level: 1, lives: 9, upgrades: [] },
     { chapter: 'a', level: 1.5, lives: 3 },
   ]) {
     const raw = JSON.stringify({ v: 1, completed: [], records: {}, run });
@@ -272,7 +272,7 @@ test('the game still works when storage is unavailable', () => {
   const p = fresh(broken);
   eq(p.startChapter('a'), true);
   p.levelPassed();
-  eq(p.run, { chapter: 'a', level: 2, lives: 3 });
+  eq(p.run, { chapter: 'a', level: 2, lives: 3, upgrades: [] });
   p.reset();
   eq(p.run, null);
 });
@@ -287,6 +287,30 @@ test('level and life events without an active run are ignored', () => {
   eq(p.run, null);
   eq(p.isChapterCompleted('a'), true);
   eq(p.isChapterCompleted('b'), false);
+});
+
+test('upgrades taken during a run stay with it, survive a reload and are lost at game over', () => {
+  const storage = fakeStorage();
+  const p = fresh(storage);
+  eq(p.addUpgrade('x'), false, 'no run, nothing to add to');
+  p.startChapter('a');
+  eq(p.run.upgrades, []);
+  p.addUpgrade('x'); p.addUpgrade('y'); p.addUpgrade('x');
+  eq(p.run.upgrades, ['x', 'y', 'x'], 'in order, repeats allowed');
+  p.levelPassed(); p.lifeLost();
+  eq(p.run.upgrades, ['x', 'y', 'x'], 'kept across levels and a lost life');
+  eq(fresh(storage).run.upgrades, ['x', 'y', 'x'], 'kept after a reload');
+  p.lifeLost(); p.lifeLost();
+  eq(p.run.upgrades, [], 'game over clears them');
+  p.addUpgrade('z'); p.startChapter('a');
+  eq(p.run.upgrades, [], 'a new run starts without');
+});
+
+test('a saved run with odd upgrades loads with none', () => {
+  for (const bad of [null, 'x', [1, 'y'], { a: 1 }]) {
+    const storage = fakeStorage({ 'gtj.v1': JSON.stringify({ v: 1, completed: [], records: {}, run: { chapter: 'a', level: 2, lives: 2, upgrades: bad } }) });
+    eq(fresh(storage).run, { chapter: 'a', level: 2, lives: 2, upgrades: [] }, JSON.stringify(bad));
+  }
 });
 
 test('endless scores that are not finite numbers are ignored', () => {
@@ -488,7 +512,7 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
   complete(p, 'a', 3);
   p.submitEndless('a', 40);
   eq(p.startChapter('a'), true);
-  eq(p.run, { chapter: 'a', level: 1, lives: 3 });
+  eq(p.run, { chapter: 'a', level: 1, lives: 3, upgrades: [] });
   eq(p.isChapterUnlocked('b'), true);
   eq(p.record('a'), 40);
 });
@@ -1121,7 +1145,7 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
   });
 
   test('otd: level 1 is 3 waves of 4-5 goblins', () => {
-    eq(D.levels[0], { waves: 3, perWave: [4, 5], types: { goblin: 1 } });
+    eq(D.levels[0], { waves: 3, perWave: [4, 5], types: { goblin: 1 }, spell: 'bolt' });
     const sizes = new Set();
     for (let seed = 1; seed <= 30; seed++) {
       const waves = OneTower.buildWaves(D.levels[0], seeded(seed));
@@ -1371,6 +1395,52 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     const es = [[60, 60], [90, 60], [90, 90], [120, 90]].map(([x, y]) => still(sim, 'orc', x, y));
     cast(sim, 4, 50, 50);
     eq(es.map(e => lost(e, 'orc')), L.damage.slice(0, 4));
+  });
+
+  // ---- levels ----
+  test('otd levels: the 5 levels of the design, each adding an enemy type and unlocking a spell', () => {
+    const shape = D.levels.map(l => [l.waves, l.perWave, Object.keys(l.types).sort(), l.spell, !!l.boss]);
+    eq(shape, [
+      [3, [4, 5], ['goblin'], 'bolt', false],
+      [4, [5, 7], ['goblin', 'wolf'], 'fireball', false],
+      [5, [6, 8], ['goblin', 'orc', 'wolf'], 'frost', false],
+      [6, [7, 10], ['goblin', 'orc', 'shaman', 'wolf'], 'lightning', false],
+      [6, [8, 12], ['goblin', 'orc', 'shaman', 'wolf'], 'meteor', true],
+    ]);
+    eq(OneTower.levelSpells(1), ['bolt']);
+    eq(OneTower.levelSpells(3), ['bolt', 'fireball', 'frost']);
+    eq(OneTower.levelSpells(5), ALL);
+  });
+
+  // A bot that casts every ready spell on the enemy closest to the Torretta, and the Bolt in between.
+  const spellBot = sim => {
+    const live = sim.active(), t = sim.tower;
+    const e = live.sort((a, b) => Math.hypot(a.x - t.x, a.y - t.y) - Math.hypot(b.x - t.x, b.y - t.y))[0];
+    if (!e) return { fire: false };
+    const ready = OneTower.SPELLS.findIndex((id, i) => i > 0 && sim.spells.includes(id) && sim.recharge[id] <= 0);
+    if (ready > 0 && sim.selected === 'bolt') return { select: ready + 1, aimX: e.x, aimY: e.y, fire: false };
+    return { aimX: e.x, aimY: e.y, fire: true };
+  };
+
+  test('otd levels: a bot using every unlocked spell and the upgrades it would have clears most attempts, the last level included', () => {
+    let passed = 0, total = 0;
+    const perLevel = [];
+    D.levels.forEach((cfg, li) => {
+      let ok = 0;
+      for (let seed = 1; seed <= 6; seed++) {
+        total++;
+        // one upgrade per level passed before this one: always the first offered
+        const ups = [];
+        for (let k = 1; k <= li; k++) ups.push(OneTower.offerUpgrades({ spells: OneTower.levelSpells(k), taken: ups, rng: seeded(seed * 3 + k) })[0]);
+        const sim = OneTower.create({ waves: OneTower.buildWaves(cfg, seeded(seed * 7 + li)), spells: OneTower.levelSpells(li + 1), upgrades: ups, rng: seeded(seed + li * 31) });
+        let ev = null;
+        for (let i = 0; i < secs(600) && !ev; i++) ev = step(sim, spellBot);
+        if (ev === 'passed') { passed++; ok++; }
+      }
+      perLevel.push(ok);
+    });
+    eq(passed >= total * 0.6, true, 'bot passed ' + passed + ' of ' + total + ' (per level ' + perLevel + ')');
+    eq(perLevel[perLevel.length - 1] >= 1, true, 'the last level can be won (per level ' + perLevel + ')');
   });
 }
 

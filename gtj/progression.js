@@ -1,4 +1,4 @@
-// Pure progression rules for GtJ: chapters, levels, lives, unlocks, endless records and saving.
+// Pure progression rules for GtJ: chapters, levels, lives, upgrades of a run, unlocks, endless records and saving.
 // No canvas, no DOM: storage and chapter data are injected so it can be tested on its own.
 const Progression = {
   KEY: 'gtj.v1',
@@ -36,12 +36,13 @@ const Progression = {
       if (chapter && api.isChapterUnlocked(chapter.id)
           && Number.isInteger(run.level) && run.level >= 1 && run.level <= chapter.levels
           && Number.isInteger(run.lives) && run.lives >= 1 && run.lives <= Progression.LIVES) {
-        state.run = { chapter: chapter.id, level: run.level, lives: run.lives };
+        const ups = Array.isArray(run.upgrades) && run.upgrades.every(u => typeof u === 'string') ? run.upgrades : [];
+        state.run = { chapter: chapter.id, level: run.level, lives: run.lives, upgrades: ups.slice() };
       }
     }
 
     const api = {
-      get run() { return state.run && { ...state.run }; },
+      get run() { return state.run && { ...state.run, upgrades: state.run.upgrades.slice() }; },
 
       isChapterCompleted(id) {
         return state.completed.includes(id);
@@ -59,7 +60,15 @@ const Progression = {
 
       startChapter(id) {
         if (!api.isChapterUnlocked(id)) return false;
-        state.run = { chapter: id, level: 1, lives: Progression.LIVES };
+        state.run = { chapter: id, level: 1, lives: Progression.LIVES, upgrades: [] };
+        save();
+        return true;
+      },
+
+      // Upgrades (Potenziamenti) belong to the run: kept across levels and lost lives, lost at game over.
+      addUpgrade(id) {
+        if (!state.run) return false;
+        state.run.upgrades.push(id);
         save();
         return true;
       },
@@ -88,6 +97,7 @@ const Progression = {
         if (--run.lives <= 0) {
           run.level = 1;
           run.lives = Progression.LIVES;
+          run.upgrades = [];
           gameOver = true;
         }
         save();

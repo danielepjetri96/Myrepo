@@ -59,9 +59,14 @@ const OneTowerData = {
   },
 
   // One entry per level, easiest first. waves: waves in the level; perWave: [min, max] enemies per wave;
-  // types: spawn weights by enemy type; boss: one more wave at the end, the Boss alone.
+  // types: spawn weights by enemy type; spell: the spell it unlocks (usable from its start);
+  // boss: one more wave at the end, the Boss alone.
   levels: [
-    { waves: 3, perWave: [4, 5], types: { goblin: 1 } },
+    { waves: 3, perWave: [4, 5],  types: { goblin: 1 },                                spell: 'bolt' },
+    { waves: 4, perWave: [5, 7],  types: { goblin: 3, wolf: 2 },                       spell: 'fireball' },
+    { waves: 5, perWave: [6, 8],  types: { goblin: 3, wolf: 2, orc: 1 },               spell: 'frost' },
+    { waves: 6, perWave: [7, 10], types: { goblin: 3, wolf: 2, orc: 1, shaman: 2 },    spell: 'lightning' },
+    { waves: 6, perWave: [8, 12], types: { goblin: 3, wolf: 3, orc: 2, shaman: 2 },    spell: 'meteor', boss: true },
   ],
 
   firstWaveDelay: 1,    // s before the first wave of a level

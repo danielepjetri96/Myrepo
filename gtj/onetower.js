@@ -21,6 +21,11 @@ const OneTower = {
     return waves;
   },
 
+  // The spells unlocked by the time level n (from 1) starts.
+  levelSpells(n) {
+    return OneTowerData.levels.slice(0, n).map(l => l.spell);
+  },
+
   // The spell and Torretta values with the given upgrades applied: { spells, tower }. The data is not changed.
   stats(upgrades) {
     const D = OneTowerData, out = JSON.parse(JSON.stringify({ spells: D.spells, tower: D.tower }));
