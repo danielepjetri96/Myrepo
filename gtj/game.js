@@ -2,13 +2,13 @@
 // Self-contained on purpose: nothing here depends on the Pixel Siege code.
 const W = 320, H = 180;
 
-// Chapter data for Progression. Level counts come from each chapter's data file; One Tower Defense is a placeholder.
+// Chapter data for Progression. Level counts come from each chapter's data file.
 const CHAPTERS = [
   { id: 'jumpguy', name: 'JUMP GUY', levels: JumpGuyData.levels.length },
   { id: 'cleartheroom', name: 'CLEAR THE ROOM', levels: ClearTheRoomData.levels.length },
-  { id: 'onetowerdefense', name: 'ONE TOWER DEFENSE', levels: 1 },
+  { id: 'onetowerdefense', name: 'ONE TOWER DEFENSE', levels: OneTowerData.levels.length },
 ];
-const PLAYABLE = { jumpguy: true, cleartheroom: true };
+const PLAYABLE = { jumpguy: true, cleartheroom: true, onetowerdefense: true };
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -94,6 +94,8 @@ function beginLevel() {
   if (chapterId === 'cleartheroom') {
     const cfg = ClearTheRoomData.levels[run.level - 1];
     sim = ClearTheRoom.createLevel({ cfg });
+  } else if (chapterId === 'onetowerdefense') {
+    sim = OneTower.create({ waves: OneTower.buildWaves(OneTowerData.levels[run.level - 1]) });
   } else {
     sim = JumpGuy.create(JumpGuy.buildLevel(run.level));
   }
@@ -213,6 +215,20 @@ function updateRoom() {
   return ev === 'lost' ? 'hit' : ev;
 }
 
+function updateTower() {
+  const ev = sim.update(DT, { aimX: mouse.x, aimY: mouse.y, fire: mouse.down });
+  for (const f of sim.fx) {
+    if (f.type === 'shoot') Sfx.shoot();
+    else if (f.type === 'hit') { Sfx.enemyHit(); burst(f.x, f.y, '#a7f070', 3); }
+    else if (f.type === 'kill') { Sfx.kill(); burst(f.x, f.y, '#a7f070', 10); }
+    else if (f.type === 'hurt') { Sfx.hit(); shake = 0.1; burst(f.x, f.y, '#94a3b8', 4); }
+  }
+  sim.fx.length = 0;
+  if (roomHelp > 0) roomHelp -= DT;
+  updateParticles();
+  return ev === 'lost' ? 'hit' : ev;
+}
+
 // Small visual particles (not part of the simulation).
 let particles = [];
 function burst(x, y, color, n) {
@@ -233,7 +249,7 @@ function update() {
   else if (scene === 'play') {
     if (wasPressed('Escape', 'KeyP')) { scene = 'pause'; sceneTime = 0; }
     else {
-      const ev = chapterId === 'cleartheroom' ? updateRoom() : updateRunner();
+      const ev = chapterId === 'cleartheroom' ? updateRoom() : chapterId === 'onetowerdefense' ? updateTower() : updateRunner();
       if (ev === 'hit') {
         Sfx.hit(); shake = 0.3; deathTimer = 0.9; scene = 'dying'; sceneTime = 0;
         if (mode === 'endless') {
@@ -376,6 +392,55 @@ const HERO = [
   '.dd..dd.',
 ];
 
+const TOWER = [
+  '....bb....',
+  '...bbbb...',
+  '..bbbbbb..',
+  '.wwwwwwww.',
+  '.w.ww.ww.w',
+  '.wwwwwwww.',
+  '.wwgwwgww.',
+  '.wwwwwwww.',
+  '.wwwddwww.',
+  '.wwwddwww.',
+  'wwwwddwwww',
+];
+const GOBLIN = ['c......c', '.cccccc.', 'cceccecc', '.cccccc.', '..cccc..', '.cc..cc.'];
+const SPELL_NAMES = ['BOLT', 'FIREBALL', 'FROST', 'LIGHTNING', 'METEOR'];
+
+function drawTower() {
+  ctx.fillStyle = '#5a8f3c'; ctx.fillRect(0, 0, W, H);
+  for (let j = 0; j < H; j += 12) for (let i = (j / 12) % 2 * 6; i < W; i += 12) { ctx.fillStyle = '#4f8235'; ctx.fillRect(i, j, 2, 2); }
+  const t = sim.tower;
+  ctx.fillStyle = '#7c6a4f'; ctx.fillRect(t.x - t.size / 2 - 2, t.y - t.size / 2 - 2, t.size + 4, t.size + 4);   // the ground the enemies stop at
+  pixels(TOWER, { b: '#3b5dc9', w: '#c2c3c7', g: '#1a1c2c', d: '#b13e53' }, Math.round(t.x - 15), Math.round(t.y - 22), 3);
+  // Salute bar under the Torretta
+  ctx.fillStyle = '#000'; ctx.fillRect(t.x - 16, t.y + t.size / 2 + 4, 32, 4);
+  ctx.fillStyle = t.hp > t.maxHp * 0.3 ? '#a7f070' : '#ef4444'; ctx.fillRect(t.x - 15, t.y + t.size / 2 + 5, Math.round(30 * Math.max(0, t.hp) / t.maxHp), 2);
+  for (const e of sim.enemies) {
+    const x = Math.round(e.x - 8), y = Math.round(e.y - 6);
+    if (e.spawnT > 0) {
+      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = '#ffcd75'; ctx.strokeRect(x + 0.5, y + 0.5, 15, 11); }
+      continue;
+    }
+    pixels(GOBLIN, e.flash > 0 ? { c: '#ffffff', e: '#ffffff' } : { c: '#38b764', e: '#ef4444' }, x, y, 2);
+  }
+  for (const b of sim.bolts) { ctx.fillStyle = '#73eff7'; ctx.fillRect(Math.round(b.x - 1.5), Math.round(b.y - 1.5), 3, 3); }
+  for (const q of particles) { ctx.fillStyle = q.color; ctx.fillRect(Math.round(q.x), Math.round(q.y), 2, 2); }
+  if (scene === 'play') {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(Math.round(mouse.x) - 3, Math.round(mouse.y), 7, 1); ctx.fillRect(Math.round(mouse.x), Math.round(mouse.y) - 3, 1, 7);
+  }
+  // spell bar: only the Bolt so far, the other slots locked
+  SPELL_NAMES.forEach((name, i) => {
+    const x = W / 2 - 37 + i * 15, y = H - 14, on = i === 0;
+    ctx.fillStyle = on ? '#ffcd75' : '#1a1c2c'; ctx.fillRect(x - 1, y - 1, 14, 13);
+    ctx.fillStyle = on ? '#3b5dc9' : '#333c57'; ctx.fillRect(x, y, 12, 11);
+    text(String(i + 1), x + 6, y + 2, on ? '#fff' : '#566c86', 8, 'center');
+  });
+  text(SPELL_NAMES[0], W / 2, H - 25, '#fff', 8, 'center');
+}
+
 function drawRoom() {
   const cam = camera(), r = sim.room, T = ClearTheRoom.TILE;
   ctx.fillStyle = '#1a1c2c'; ctx.fillRect(0, 0, W, H);
@@ -443,7 +508,8 @@ function drawLives() {
   }
   text('LIVES', 6, 6, '#fff', 8);
   for (let i = 0; i < Progression.LIVES; i++) pixels(HEART, { r: i < hud.lives ? '#ef4444' : '#333c57' }, 46 + i * 10, 5);
-  text('LEVEL ' + hud.level + '/' + JumpGuyData.levels.length, W - 6, 6, '#fff', 8, 'right');
+  text('LEVEL ' + hud.level + '/' + CHAPTERS.find(c => c.id === chapterId).levels, W - 6, 6, '#fff', 8, 'right');
+  if (chapterId === 'onetowerdefense') text('WAVE ' + Math.max(1, sim.waveIndex) + '/' + sim.waveCount, W / 2, 6, '#fff', 8, 'center');
 }
 function drawBossBar(b) {
   text('BOSS', W / 2, 4, '#ef4444', 8, 'center');
@@ -505,13 +571,14 @@ function drawMenu() {
 }
 
 function draw() {
-  canvas.style.cursor = scene === 'play' && chapterId === 'cleartheroom' ? 'none' : '';
+  canvas.style.cursor = scene === 'play' && chapterId !== 'jumpguy' ? 'none' : '';
   ctx.setTransform(VIEW_SCALE, 0, 0, VIEW_SCALE, 0, 0);
   ctx.imageSmoothingEnabled = false;
   ctx.save();
   if (shake > 0) ctx.translate(Math.round((Math.random() - 0.5) * 6), Math.round((Math.random() - 0.5) * 6));
   if (scene === 'menu' || scene === 'confirm') drawMenu();
   else if (chapterId === 'cleartheroom') drawRoom();
+  else if (chapterId === 'onetowerdefense') drawTower();
   else drawLevel();
   ctx.restore();
   if (scene === 'confirm') {
@@ -531,6 +598,9 @@ function draw() {
     if (chapterId === 'cleartheroom') {
       if (sim.cleared) text('ROOM CLEARED - TAKE THE OPEN DOOR', W / 2, 160, '#a7f070', 8, 'center');
       else if (roomHelp > 0) text('WASD MOVE   MOUSE AIM + HOLD CLICK TO SHOOT', W / 2, 160, '#fff', 8, 'center');
+    } else if (chapterId === 'onetowerdefense') {
+      if (roomHelp > 0) text('AIM WITH THE MOUSE, HOLD CLICK TO CAST THE BOLT', W / 2, 30, '#fff', 8, 'center');
+      if (sim.enemies.length === 0 && sim.waveIndex < sim.waveCount) text('WAVE ' + (sim.waveIndex + 1) + '/' + sim.waveCount, W / 2, 60, '#ffcd75', 16, 'center');
     } else {
       if (mode === 'chapter') drawProgressBar();
       if (sim.dist < 120) text('SPACE / UP / CLICK TO JUMP', W / 2, 30, '#fff', 8, 'center');
