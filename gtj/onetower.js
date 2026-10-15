@@ -67,6 +67,7 @@ const OneTower = {
       waveTimer: D.firstWaveDelay,
       queue: [],              // enemy types of the current wave still to walk in
       spawnTimer: 0,
+      stats: ST,              // spell and Torretta values with the upgrades applied (see stats)
       spells,                 // unlocked spells
       selected: 'bolt',
       recharge: Object.fromEntries(OneTower.SPELLS.map(id => [id, 0])),   // s left of each spell's Ricarica

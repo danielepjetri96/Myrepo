@@ -44,6 +44,13 @@ const Sfx = {
   deny() { this.tone(120, 100, 0.12, 'square', 0.07); },
   warn() { [0, 0.25, 0.5, 0.75].forEach(d => this.tone(880, 880, 0.08, 'square', 0.06, d)); },
   summon() { this.tone(90, 400, 0.4, 'sawtooth', 0.1); },
+  boom() { this.tone(160, 40, 0.35, 'sawtooth', 0.12); },
+  cast(spell) {
+    if (spell === 'fireball') this.tone(300, 150, 0.2, 'sawtooth', 0.07);
+    else if (spell === 'frost') this.tone(1200, 600, 0.3, 'triangle', 0.08);
+    else if (spell === 'lightning') this.tone(1500, 80, 0.15, 'square', 0.08);
+    else if (spell === 'meteor') this.tone(900, 120, 0.9, 'sawtooth', 0.07);
+  },
 };
 
 // ---- input: keyboard and mouse only ----
@@ -80,6 +87,7 @@ let mode = 'chapter';               // chapter | endless
 let endlessResult = null;           // { score, record, newRecord } after an endless run
 let controlsHint = 0;               // seconds left of the controls hint shown at the start of play
 let sim = null, deathTimer = 0, sceneTime = 0, shake = 0, gameOver = false;
+let upgradeOffer = [];              // the upgrades to choose from after a One Tower Defense level
 
 // Starts (or resumes, if a saved run exists) a chapter at its saved level.
 function startChapter(id) {
@@ -194,8 +202,10 @@ const PLAY = {
     update: updateRoom, draw: drawRoom, hud: drawRoomHud, messages: drawRoomMessages, hearts: true, hideCursor: true,
   },
   onetowerdefense: {
-    level: n => OneTower.create({ waves: OneTower.buildWaves(OneTowerData.levels[n - 1]) }),
+    level: n => OneTower.create({ waves: OneTower.buildWaves(OneTowerData.levels[n - 1]), spells: OneTower.levelSpells(n), upgrades: progression.run.upgrades }),
     update: updateTower, draw: drawField, hud: drawFieldHud, messages: drawFieldMessages, hideCursor: true,
+    // after a level: 3 upgrades for the spells of the next one
+    offerUpgrades: () => OneTower.offerUpgrades({ spells: OneTower.levelSpells(progression.run.level), taken: progression.run.upgrades }),
   },
 };
 
@@ -209,7 +219,14 @@ function playFx() {
     else if (f.type === 'heal') { Sfx.heal(); burst(f.x, f.y, '#ef4444', 6); }
     else if (f.type === 'warn') Sfx.warn();
     else if (f.type === 'summon') { Sfx.summon(); burst(f.x, f.y, '#ef4444', 14); }
+    else if (f.type === 'deny') Sfx.deny();
+    else if (f.type === 'cast') { Sfx.cast(f.spell); if (f.spell === 'frost') sparks.push({ ring: true, x: f.x, y: f.y, r: sim.stats.spells.frost.radius, color: '#73eff7', life: 0.4 }); }
+    else if (f.type === 'blast') { Sfx.boom(); burst(f.x, f.y, '#ef7d57', 14); sparks.push({ ring: true, x: f.x, y: f.y, r: f.radius, color: '#ffcd75', life: 0.25 }); }
+    else if (f.type === 'lightning') sparks.push({ points: [{ x: f.x, y: f.y }, ...f.points], color: '#ffffff', life: 0.2 });
+    else if (f.type === 'zap') sparks.push({ points: [{ x: f.x, y: f.y }, { x: f.tx, y: f.ty }], color: '#b55dff', life: 0.15 });
   }
+  for (const k of sparks) k.life -= DT;
+  sparks = sparks.filter(k => k.life > 0);
   sim.fx.length = 0;
   if (controlsHint > 0) controlsHint -= DT;
   updateParticles();
@@ -230,8 +247,12 @@ function updateRoom() {
   return ev === 'lost' ? 'hit' : ev;
 }
 
+// Short-lived lines and rings drawn over the field (lightning, strikes from a distance, blasts, Frost).
+let sparks = [];
+
 function updateTower() {
-  const ev = sim.update(DT, { aimX: mouse.x, aimY: mouse.y, fire: mouse.down });
+  const key = [1, 2, 3, 4, 5].find(k => wasPressed('Digit' + k, 'Numpad' + k));
+  const ev = sim.update(DT, { aimX: mouse.x, aimY: mouse.y, fire: mouse.down, select: key });
   playFx();
   return ev === 'lost' ? 'hit' : ev;
 }
@@ -271,6 +292,8 @@ function update() {
         }
       } else if (ev === 'passed') {
         Sfx.win(); const passed = progression.levelPassed(); clearedChapter = !!(passed && passed.chapterCompleted); scene = 'cleared'; sceneTime = 0;
+        const offer = PLAY[chapterId].offerUpgrades;
+        if (mode === 'chapter' && !clearedChapter && offer) { upgradeOffer = offer(); if (upgradeOffer.length) scene = 'upgrade'; }
       }
     }
   } else if (scene === 'pause') {
@@ -286,6 +309,10 @@ function update() {
       if (gameOver) { Sfx.over(); scene = 'over'; sceneTime = 0; }
       else beginLevel();
     }
+  } else if (scene === 'upgrade') {
+    // one must be chosen (no way out): it belongs to the run from now on
+    const k = sceneTime > 0.4 ? upgradeOffer.findIndex((id, i) => wasPressed('Digit' + (i + 1), 'Numpad' + (i + 1)) || hit(upgradeButton(i))) : -1;
+    if (k >= 0) { progression.addUpgrade(upgradeOffer[k]); Sfx.select(); beginLevel(); }
   } else if (scene === 'cleared') {
     if (sceneTime > 0.4 && (wasPressed('Enter', 'Space', 'Escape') || click)) {
       if (clearedChapter || wasPressed('Escape')) toMenu(); else beginLevel();
@@ -412,12 +439,24 @@ const TOWER = [
   '.wwwddwww.',
   'wwwwddwwww',
 ];
-const GOBLIN = ['c......c', '.cccccc.', 'cceccecc', '.cccccc.', '..cccc..', '.cc..cc.'];
-const SPELL_NAMES = ['BOLT', 'FIREBALL', 'FROST', 'LIGHTNING', 'METEOR'];
+// One Tower Defense art: pixel rows drawn at 2x, centered on the enemy. Letter c is the body color, e the eyes.
+const FIELD_ART = {
+  goblin: { c: '#38b764', rows: ['c......c', '.cccccc.', 'cceccecc', '.cccccc.', '..cccc..', '.cc..cc.'] },
+  wolf:   { c: '#94a3b8', rows: ['c.......', 'cc..cccc', '.ccccecc', '.cccccc.', '.c.c.c.c'] },
+  orc:    { c: '#257179', rows: ['..ccccc..', '.ccccccc.', 'ccecccecc', 'ccccccccc', 'c.ccccc.c', '.ccccccc.', '.cc...cc.', '.cc...cc.'] },
+  shaman: { c: '#b55dff', rows: ['..cc.y', '.cccc|', 'cecce|', '.cccc|', '.c..c|'] },
+  boss:   { c: '#b13e53', rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccceecccceecc', 'ccceecccceecc', 'ccccccccccccc', 'cccc.....cccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
+};
+const SPELL_NAMES = { bolt: 'BOLT', fireball: 'FIREBALL', frost: 'FROST', lightning: 'LIGHTNING', meteor: 'METEOR' };
+
+function ring(x, y, r, color) { ctx.strokeStyle = color; ctx.beginPath(); ctx.arc(Math.round(x), Math.round(y), r, 0, Math.PI * 2); ctx.stroke(); }
 
 function drawField() {
   ctx.fillStyle = '#5a8f3c'; ctx.fillRect(0, 0, W, H);
   for (let j = 0; j < H; j += 12) for (let i = (j / 12) % 2 * 6; i < W; i += 12) { ctx.fillStyle = '#4f8235'; ctx.fillRect(i, j, 2, 2); }
+  // burning ground and falling meteors (a blinking circle where it will land)
+  for (const f of sim.fires) { ctx.fillStyle = 'rgba(239,125,87,0.35)'; ctx.beginPath(); ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2); ctx.fill(); }
+  for (const m of sim.meteors) if (Math.floor(m.t * 10) % 2 === 0) ring(m.x, m.y, sim.stats.spells.meteor.radius, '#ef4444');
   const t = sim.tower;
   ctx.fillStyle = '#7c6a4f'; ctx.fillRect(t.x - t.size / 2 - 2, t.y - t.size / 2 - 2, t.size + 4, t.size + 4);   // the ground the enemies stop at
   pixels(TOWER, { b: '#3b5dc9', w: '#c2c3c7', g: '#1a1c2c', d: '#b13e53' }, Math.round(t.x - 15), Math.round(t.y - 22), 3);
@@ -425,27 +464,38 @@ function drawField() {
   ctx.fillStyle = '#000'; ctx.fillRect(t.x - 16, t.y + t.size / 2 + 4, 32, 4);
   ctx.fillStyle = t.hp > t.maxHp * 0.3 ? '#a7f070' : '#ef4444'; ctx.fillRect(t.x - 15, t.y + t.size / 2 + 5, Math.round(30 * Math.max(0, t.hp) / t.maxHp), 2);
   for (const e of sim.enemies) {
-    const x = Math.round(e.x - 8), y = Math.round(e.y - 6);
+    const art = FIELD_ART[e.type], w = art.rows[0].length * 2, h = art.rows.length * 2;
+    const x = Math.round(e.x - w / 2), y = Math.round(e.y - h / 2);
     if (e.spawnT > 0) {
-      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = '#ffcd75'; ctx.strokeRect(x + 0.5, y + 0.5, 15, 11); }
+      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = '#ffcd75'; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
       continue;
     }
-    pixels(GOBLIN, e.flash > 0 ? { c: '#ffffff', e: '#ffffff' } : { c: '#38b764', e: '#ef4444' }, x, y, 2);
+    const body = e.flash > 0 ? '#ffffff' : e.slowT > 0 ? '#73eff7' : art.c;   // white when hit, icy while slowed
+    pixels(art.rows, { c: body, e: e.flash > 0 ? '#ffffff' : '#ef4444', y: '#ffcd75', '|': '#7c6a4f' }, x, y, 2);
   }
   for (const b of sim.bolts) { ctx.fillStyle = '#73eff7'; ctx.fillRect(Math.round(b.x - 1.5), Math.round(b.y - 1.5), 3, 3); }
+  for (const f of sim.fireballs) { ctx.fillStyle = '#ef7d57'; ctx.fillRect(Math.round(f.x - 3), Math.round(f.y - 3), 6, 6); ctx.fillStyle = '#ffcd75'; ctx.fillRect(Math.round(f.x - 1), Math.round(f.y - 1), 2, 2); }
+  for (const k of sparks) {
+    if (k.ring) { ring(k.x, k.y, k.r, k.color); continue; }
+    ctx.strokeStyle = k.color; ctx.beginPath(); ctx.moveTo(k.points[0].x, k.points[0].y);
+    for (const q of k.points.slice(1)) ctx.lineTo(q.x, q.y);
+    ctx.stroke();
+  }
   for (const q of particles) { ctx.fillStyle = q.color; ctx.fillRect(Math.round(q.x), Math.round(q.y), 2, 2); }
   if (scene === 'play') {
     ctx.fillStyle = '#fff';
     ctx.fillRect(Math.round(mouse.x) - 3, Math.round(mouse.y), 7, 1); ctx.fillRect(Math.round(mouse.x), Math.round(mouse.y) - 3, 1, 7);
   }
-  // spell bar: only the Bolt so far, the other slots locked
-  SPELL_NAMES.forEach((name, i) => {
-    const x = W / 2 - 37 + i * 15, y = H - 14, on = i === 0;
-    ctx.fillStyle = on ? '#ffcd75' : '#1a1c2c'; ctx.fillRect(x - 1, y - 1, 14, 13);
+  // spell bar: keys 1-5, the selected one highlighted, a dark cover shrinking while a spell recharges
+  OneTower.SPELLS.forEach((id, i) => {
+    const x = W / 2 - 37 + i * 15, y = H - 14, on = sim.spells.includes(id), sel = sim.selected === id;
+    ctx.fillStyle = sel ? '#ffcd75' : '#1a1c2c'; ctx.fillRect(x - 1, y - 1, 14, 13);
     ctx.fillStyle = on ? '#3b5dc9' : '#333c57'; ctx.fillRect(x, y, 12, 11);
+    const left = id === 'bolt' ? 0 : Math.max(0, sim.recharge[id]) / sim.stats.spells[id].recharge;
+    if (on && left > 0) { ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y, 12, Math.ceil(11 * left)); }
     text(String(i + 1), x + 6, y + 2, on ? '#fff' : '#566c86', 8, 'center');
   });
-  text(SPELL_NAMES[0], W / 2, H - 25, '#fff', 8, 'center');
+  text(SPELL_NAMES[sim.selected], W / 2, H - 25, '#fff', 8, 'center');
 }
 
 function drawRoom() {
@@ -522,7 +572,8 @@ function drawRoomHud() {
 }
 function drawFieldHud() {
   drawLivesAndLevel();
-  text('WAVE ' + Math.max(1, sim.waveIndex) + '/' + sim.waveCount, W / 2, 6, '#fff', 8, 'center');
+  if (sim.boss) drawBossBar(sim.boss);
+  else text('WAVE ' + Math.max(1, sim.waveIndex) + '/' + sim.waveCount, W / 2, 6, '#fff', 8, 'center');
 }
 function drawRunnerMessages() {
   if (mode === 'chapter') drawProgressBar();
@@ -533,7 +584,7 @@ function drawRoomMessages() {
   else if (controlsHint > 0) text('WASD MOVE   MOUSE AIM + HOLD CLICK TO SHOOT', W / 2, 160, '#fff', 8, 'center');
 }
 function drawFieldMessages() {
-  if (controlsHint > 0) text('AIM WITH THE MOUSE, HOLD CLICK TO CAST THE BOLT', W / 2, 30, '#fff', 8, 'center');
+  if (controlsHint > 0) text(sim.spells.length > 1 ? 'KEYS 1-' + sim.spells.length + ' CHOOSE A SPELL, CLICK TO CAST' : 'AIM WITH THE MOUSE, HOLD CLICK TO CAST THE BOLT', W / 2, 30, '#fff', 8, 'center');
   if (sim.enemies.length === 0 && sim.waveIndex < sim.waveCount) text('WAVE ' + (sim.waveIndex + 1) + '/' + sim.waveCount, W / 2, 60, '#ffcd75', 16, 'center');
 }
 function drawBossBar(b) {
@@ -550,6 +601,12 @@ function drawProgressBar() {
 function chapterEndText() {
   const i = CHAPTERS.findIndex(c => c.id === chapterId), next = CHAPTERS[i + 1];
   return 'CHAPTER ' + (i + 1) + ' COMPLETE' + (next ? ' - CHAPTER ' + (i + 2) + ' UNLOCKED' : '');
+}
+
+const upgradeButton = i => ({ x: 50, y: 108 + i * 20, w: 220, h: 16 });
+function drawUpgradeChoice() {
+  panel('LEVEL CLEARED!', ['CHOOSE AN UPGRADE (1-' + upgradeOffer.length + ')'], '#a7f070');
+  upgradeOffer.forEach((id, i) => button(upgradeButton(i), (i + 1) + '  ' + OneTowerData.upgrades[id].name, '#3b5dc9'));
 }
 
 function panel(title, lines, color) {
@@ -618,7 +675,10 @@ function draw() {
     return;
   }
   if (scene === 'play') PLAY[chapterId].messages();
-  else if (scene === 'cleared') {
+  else if (scene === 'upgrade') drawUpgradeChoice();
+  else if (scene === 'cleared' && clearedChapter && chapterId === CHAPTERS[CHAPTERS.length - 1].id) {
+    panel('GtJ COMPLETE!', ['ALL THREE CHAPTERS CLEARED', 'ONE TOWER DEFENSE ENDLESS UNLOCKED', '', 'PRESS ENTER OR CLICK FOR THE MENU'], '#ffcd75');
+  } else if (scene === 'cleared') {
     panel(clearedChapter ? 'CHAPTER CLEARED!' : 'LEVEL CLEARED!', [clearedChapter ? chapterEndText() : 'GET READY FOR THE NEXT LEVEL', '', clearedChapter ? 'PRESS ENTER OR CLICK FOR THE MENU' : 'ENTER / CLICK: NEXT LEVEL   ESC: MENU'], '#a7f070');
   } else if (scene === 'over') {
     if (mode === 'endless') {

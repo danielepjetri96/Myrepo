@@ -55,7 +55,7 @@ const OneTowerData = {
     lightningDamage:  { target: 'lightning', name: 'LIGHTNING: +2 DAMAGE',      add: { damage: 2 } },
     meteorRecharge:   { target: 'meteor',    name: 'METEOR: -30% RECHARGE',     mul: { recharge: 0.7 } },
     meteorDamage:     { target: 'meteor',    name: 'METEOR: +50% DAMAGE',       mul: { damage: 1.5 } },
-    towerHealth:      { target: 'tower',     name: 'TORRETTA: +5 MAX HEALTH',   add: { hp: 5 }, repeatable: true },
+    towerHealth:      { target: 'tower',     name: 'TOWER: +5 MAX HEALTH',   add: { hp: 5 }, repeatable: true },
   },
 
   // One entry per level, easiest first. waves: waves in the level; perWave: [min, max] enemies per wave;
