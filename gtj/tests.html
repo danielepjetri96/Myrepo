@@ -18,6 +18,8 @@
 <script src="cleartheroom-data.js"></script>
 <script src="cleartheroom.js"></script>
 <script src="jumpguy.js"></script>
+<script src="onetower-data.js"></script>
+<script src="onetower.js"></script>
 <script>
 // Tiny test runner: open this file in a browser, no server needed.
 const results = [];
@@ -1029,6 +1031,117 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     for (let k = 1; k < 25; k++) nextEndlessRoom(run);
     const w25 = firstWave(run);
     eq(w25.length >= 7 && w25.length <= 9, true, 'room 25 wave size ' + w25.length);
+  });
+}
+
+// ---- One Tower Defense ----
+{
+  const D = OneTowerData;
+  const idle = { aimX: 0, aimY: 0, fire: false };
+  const step = (sim, input, n) => { let ev = null; for (let i = 0; i < (n || 1) && !ev; i++) ev = sim.update(STEP, Object.assign({}, idle, typeof input === 'function' ? input(sim) : input)); return ev; };
+  const secs = n => Math.round(n / STEP);
+  const fxCount = (sim, type) => sim.fx.filter(f => f.type === type).length;
+  // Steps until the first enemy is on the field and active.
+  const untilActive = sim => { for (let i = 0; i < secs(10) && !sim.enemies.some(e => e.spawnT <= 0); i++) step(sim, {}); return sim.enemies.find(e => e.spawnT <= 0); };
+  const aimAtFirst = sim => sim.enemies[0] ? { aimX: sim.enemies[0].x, aimY: sim.enemies[0].y, fire: true } : { fire: false };
+
+  test('otd: the Bolt fires twice a second toward the cursor, and a goblin dies on the 4th hit', () => {
+    const sim = OneTower.create({ waves: [['goblin'], ['goblin']], rng: seeded(1) });
+    const g = untilActive(sim);
+    eq(g.type, 'goblin');
+    sim.fx.length = 0;
+    let hits = 0, kills = 0, shots = 0;
+    for (let i = 0; i < secs(10) && !kills; i++) {
+      step(sim, aimAtFirst);
+      hits += fxCount(sim, 'hit'); kills += fxCount(sim, 'kill'); shots += fxCount(sim, 'shoot');
+      sim.fx.length = 0;
+    }
+    eq(kills, 1, 'the goblin died');
+    eq(hits, D.enemies.goblin.hp - 1, 'hits before the killing one');
+    eq(sim.enemies.includes(g), false);
+    const s2 = OneTower.create({ waves: [['goblin']], rng: seeded(1) });
+    step(s2, { aimX: 0, aimY: 0, fire: true }, secs(1));
+    eq(fxCount(s2, 'shoot'), D.bolt.fireRate, 'shots in one second');
+  });
+
+  test('otd: a goblin walks in from the edge at its speed, stops at the Torretta and hits it once a second', () => {
+    const sim = OneTower.create({ waves: [['goblin']], rng: seeded(2) });
+    const g = untilActive(sim), t = sim.tower, G = D.enemies.goblin;
+    eq(g.x <= g.size / 2 + 0.01 || g.x >= 320 - g.size / 2 - 0.01 || g.y <= g.size / 2 + 0.01 || g.y >= 180 - g.size / 2 - 0.01, true, 'starts on the edge');
+    const d0 = Math.hypot(t.x - g.x, t.y - g.y);
+    step(sim, {}, secs(1));
+    eq(Math.abs(d0 - Math.hypot(t.x - g.x, t.y - g.y) - G.speed) < 0.5, true, 'walks about its speed in a second');
+    const touching = () => Math.max(Math.abs(t.x - g.x), Math.abs(t.y - g.y)) <= (t.size + g.size) / 2 + 0.01;
+    for (let i = 0; i < secs(30) && !touching(); i++) step(sim, {});
+    eq(touching(), true, 'it reached the Torretta');
+    for (let i = 0; i < secs(2) && !fxCount(sim, 'hurt'); i++) step(sim, {});   // its first hit
+    const at = { x: g.x, y: g.y }, hp = t.hp;
+    step(sim, {}, secs(2.5));
+    eq({ x: g.x, y: g.y }, at, 'it stays there');
+    eq(hp - t.hp, 2 * G.damage, 'one hit per second');
+  });
+
+  test('otd: the level is lost when the Torretta runs out of health', () => {
+    const sim = OneTower.create({ waves: [['goblin', 'goblin', 'goblin']], rng: seeded(3) });
+    eq(sim.tower.hp, D.tower.hp, 'starts full');
+    let ev = null;
+    for (let i = 0; i < secs(120) && !ev; i++) ev = step(sim, {});
+    eq(ev, 'lost');
+    eq(sim.tower.hp <= 0, true);
+    eq(step(sim, {}, 10), null, 'nothing more after the end');
+  });
+
+  test('otd: the next wave comes 3 s after one is defeated, and the level passes once every wave is defeated', () => {
+    const sim = OneTower.create({ waves: [['goblin'], ['goblin']], rng: seeded(4) });
+    // shoot the first goblin down
+    let ev = null;
+    for (let i = 0; i < secs(20) && !fxCount(sim, 'kill'); i++) ev = step(sim, aimAtFirst);
+    eq(ev, null, 'not passed with a wave still to come');
+    eq(sim.waveIndex, 1);
+    eq(step(sim, {}, secs(D.waveDelay - 0.2)), null);
+    eq(sim.enemies.length, 0, 'a pause before the next wave');
+    step(sim, {}, secs(0.4));
+    eq(sim.waveIndex, 2, 'second wave started');
+    eq(sim.enemies.length, 1);
+    sim.fx.length = 0;
+    for (let i = 0; i < secs(20) && !ev; i++) ev = step(sim, aimAtFirst);
+    eq(fxCount(sim, 'kill'), 1, 'killed the last goblin');
+    eq(ev, 'passed');
+  });
+
+  test('otd: enemies of a wave walk in one at a time, 0.7 s apart', () => {
+    const sim = OneTower.create({ waves: [['goblin', 'goblin', 'goblin']], rng: seeded(5) });
+    step(sim, {}, secs(D.firstWaveDelay + 0.05));
+    eq(sim.enemies.length, 1, 'the first one');
+    step(sim, {}, secs(D.spawnEvery));
+    eq(sim.enemies.length, 2, 'the second one');
+    eq(sim.enemies[1].spawnT > 0, true, 'blinking at the edge before walking in');
+    step(sim, {}, secs(D.spawnEvery));
+    eq(sim.enemies.length, 3, 'the third one');
+  });
+
+  test('otd: level 1 is 3 waves of 4-5 goblins', () => {
+    eq(D.levels[0], { waves: 3, perWave: [4, 5], types: { goblin: 1 } });
+    const sizes = new Set();
+    for (let seed = 1; seed <= 30; seed++) {
+      const waves = OneTower.buildWaves(D.levels[0], seeded(seed));
+      eq(waves.length, 3, 'seed ' + seed);
+      for (const w of waves) { eq(w.length >= 4 && w.length <= 5, true, 'wave size ' + w.length); eq(w.every(id => id === 'goblin'), true); sizes.add(w.length); }
+    }
+    eq([...sizes].sort(), [4, 5], 'both sizes happen');
+  });
+
+  test('otd: a bot that shoots the enemy closest to the Torretta clears level 1, and doing nothing loses it', () => {
+    const closest = sim => {
+      const live = sim.enemies.filter(e => e.spawnT <= 0), t = sim.tower;
+      const e = live.sort((a, b) => Math.hypot(a.x - t.x, a.y - t.y) - Math.hypot(b.x - t.x, b.y - t.y))[0];
+      return e ? { aimX: e.x, aimY: e.y, fire: true } : { fire: false };
+    };
+    for (let seed = 1; seed <= 5; seed++) {
+      const play = input => { const sim = OneTower.create({ waves: OneTower.buildWaves(D.levels[0], seeded(seed)), rng: seeded(seed + 50) }); let ev = null; for (let i = 0; i < secs(300) && !ev; i++) ev = step(sim, input); return ev; };
+      eq(play(closest), 'passed', 'bot, seed ' + seed);
+      eq(play({}), 'lost', 'idle, seed ' + seed);
+    }
   });
 }
 
