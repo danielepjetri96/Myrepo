@@ -934,6 +934,38 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     eq(touch('chase'), 1, 'chasing');
     eq(touch('charge'), D.boss.charge.damage, 'charging');
   });
+
+  test('ctr boss: below half health it summons 3 runners right away and again every 10 seconds', () => {
+    const runners = sim => sim.enemies.filter(e => e.type === 'runner').length;
+    const calm = mkFarBoss();
+    step(calm, {}, secs(12));
+    eq(runners(calm), 0, 'no summons above half health');
+    const sim = mkFarBoss();
+    sim.boss.hp = D.boss.hp / 2 - 1;
+    step(sim, {}, 1);
+    eq(runners(sim), D.boss.summon.count, 'first summon');
+    step(sim, {}, secs(9));
+    eq(runners(sim), D.boss.summon.count, 'nothing new before 10 s');
+    step(sim, {}, secs(1.5));
+    eq(runners(sim), D.boss.summon.count * 2, 'second summon');
+  });
+
+  test('ctr boss: only the last room of the last level is the Boss room, with no waves', () => {
+    D.levels.forEach((cfg, i) => eq(!!cfg.boss, i === D.levels.length - 1, 'level ' + (i + 1)));
+    const lv = ClearTheRoom.createLevel({ cfg: levelCfg(2, { boss: true }), rng: seeded(3) });
+    eq(lv.sim.boss, null, 'first room is an ordinary room');
+    clearRoom(lv);
+    const door = doorCenter(lv.sim.room);
+    lv.sim.player.x = door.x; lv.sim.player.y = door.y;
+    eq(stepLevel(lv, {}, 2), 'room');
+    stepLevel(lv, {}, secs(1));   // the fade swaps the rooms
+    eq(lv.roomIndex, 1);
+    eq(lv.sim.boss !== null, true, 'last room has the Boss');
+    eq(lv.sim.enemies.length, 1, 'and nothing else');
+    eq(lv.sim.room.doors.length, 0, 'no exit door');
+    lv.sim.boss.hp = 0;
+    eq(stepLevel(lv, {}, secs(3)), 'passed');
+  });
 }
 
 // ---- report ----

@@ -56,7 +56,7 @@ const ClearTheRoom = {
     return Array.from({ length: count(cfg.waves) }, () => Array.from({ length: count(cfg.perWave) }, pick));
   },
 
-  // A level: a chain of rooms, each picked at random (never the same layout twice in a row).
+  // A level: a chain of rooms, each picked at random (never the same layout twice in a row); with cfg.boss the last one is the Boss arena.
   // Health carries over from room to room. Exposes the current room's room/player/enemies/bullets/fx.
   // update returns 'passed', 'lost' or 'room' (just entered the next room); during the short transition it returns null.
   createLevel({ cfg, rng }) {
@@ -68,7 +68,10 @@ const ClearTheRoom = {
       picks.push(k);
     }
     const waves = picks.map(() => ClearTheRoom.buildWaves(cfg, rng));
-    const make = (index, carry) => ClearTheRoom.create({ layout: layouts[picks[index]], waves: waves[index], final: index === cfg.rooms - 1, carry, rng });
+    const isBoss = index => !!cfg.boss && index === cfg.rooms - 1;
+    const make = (index, carry) => isBoss(index)
+      ? ClearTheRoom.create({ layout: ClearTheRoomData.bossLayout, waves: [], boss: true, carry, rng })
+      : ClearTheRoom.create({ layout: layouts[picks[index]], waves: waves[index], final: index === cfg.rooms - 1, carry, rng });
     const T = ClearTheRoom.ROOM_TRANSITION;
     const level = {
       roomIndex: 0,
@@ -83,6 +86,7 @@ const ClearTheRoom = {
       get bullets() { return level.sim.bullets; },
       get fx() { return level.sim.fx; },
       get pickups() { return level.sim.pickups; },
+      get boss() { return level.sim.boss; },
       get cleared() { return level.transition <= 0 && level.sim.cleared; },
       update(dt, input) {
         if (level.transition > 0) {
@@ -115,7 +119,7 @@ const ClearTheRoom = {
       enemies: [],
       pickups: [],            // hearts left by dead enemies: { x, y }
       bullets: [],
-      fx: [],                 // { type: 'shoot' | 'hit' | 'kill' | 'hurt', x, y }
+      fx: [],                 // { type: 'shoot' | 'hit' | 'kill' | 'hurt' | 'heal' | 'warn' | 'summon', x, y }
       state: 'running',       // running | lost | passed
       cleared: false,         // every wave defeated; doors open (non-final rooms)
       waveIndex: 0,
@@ -202,7 +206,7 @@ const ClearTheRoom = {
       makeEnemy(id, x, y, spawnT) {
         const def = D.enemies[id] || D.boss;
         const e = { type: id, x, y, size: def.size, hp: def.hp, speed: def.speed, damage: def.damage, spawnT, flash: 0 };
-        if (id === 'boss') { e.state = 'chase'; e.timer = def.charge.every; }
+        if (id === 'boss') { e.state = 'chase'; e.timer = def.charge.every; e.summonTimer = 0; }
         return e;
       },
 
@@ -249,8 +253,12 @@ const ClearTheRoom = {
 
       // The Boss alternates chasing with a charge: chase, stand still and blink (warning), then dash.
       updateBoss(e, dt) {
-        const C = D.boss.charge;
+        const C = D.boss.charge, S = D.boss.summon;
         e.timer -= dt;
+        if (e.hp < D.boss.hp * S.below) {
+          e.summonTimer -= dt;
+          if (e.summonTimer <= 0) { sim.summon(e); e.summonTimer = S.every; }
+        }
         if (e.state === 'chase') {
           sim.chase(e, dt);
           if (e.timer <= 0) {
@@ -258,12 +266,24 @@ const ClearTheRoom = {
             const dx = sim.player.x - e.x, dy = sim.player.y - e.y, d = Math.hypot(dx, dy) || 1;
             e.dirX = dx / d; e.dirY = dy / d;
             e.state = 'warning'; e.timer = C.warning;
+            sim.fx.push({ type: 'warn', x: e.x, y: e.y });
           }
         } else if (e.state === 'warning') {
           if (e.timer <= 0) { e.state = 'charge'; e.timer = C.duration; }
         } else {
           sim.move(e, e.dirX * C.speed * dt, e.dirY * C.speed * dt);
           if (e.timer <= 0) { e.state = 'chase'; e.timer = C.every; }
+        }
+      },
+
+      // The Boss calls reinforcements around itself; they blink briefly before they attack.
+      summon(e) {
+        const S = D.boss.summon, half = D.enemies[S.type].size / 2;
+        sim.fx.push({ type: 'summon', x: e.x, y: e.y });
+        for (let k = 0; k < S.count; k++) {
+          const a = (k / S.count) * Math.PI * 2, x = e.x + Math.cos(a) * e.size, y = e.y + Math.sin(a) * e.size;
+          const free = !room.hits(x, y, half);
+          sim.enemies.push(sim.makeEnemy(S.type, free ? x : e.x, free ? y : e.y, D.spawnWarning));
         }
       },
 

@@ -24,13 +24,13 @@ const ClearTheRoomData = {
   },
 
   // One entry per level, easiest first. rooms: rooms in the chain; waves: waves per room (a number or [min, max]);
-  // perWave: [min, max] enemies per wave; types: spawn weights by enemy type.
+  // perWave: [min, max] enemies per wave; types: spawn weights by enemy type; boss: the last room is the Boss arena (counted in rooms).
   levels: [
     { rooms: 3, waves: 2,      perWave: [3, 4], types: { grunt: 1 } },
     { rooms: 4, waves: 2,      perWave: [4, 5], types: { grunt: 3, runner: 2 } },
     { rooms: 4, waves: [2, 3], perWave: [4, 6], types: { grunt: 3, runner: 2, brute: 1 } },
     { rooms: 5, waves: 3,      perWave: [5, 7], types: { grunt: 3, runner: 2, brute: 1, splitter: 2 } },
-    { rooms: 6, waves: 3,      perWave: [6, 8], types: { grunt: 3, runner: 3, brute: 2, splitter: 2 } },
+    { rooms: 6, waves: 3,      perWave: [6, 8], types: { grunt: 3, runner: 3, brute: 2, splitter: 2 }, boss: true },
   ],
 
   // The Boss waits alone in the last room of the last level. Touching it hurts for `damage`; its charge hurts for `charge.damage`.
@@ -46,6 +46,12 @@ const ClearTheRoomData = {
       duration: 0.8,    // s the dash lasts
       speed: 160,       // px/s during the dash
       damage: 2,
+    },
+    summon: {
+      below: 0.5,       // fraction of health under which the Boss starts summoning
+      every: 10,        // s between two summons (the first one is right when it drops below)
+      type: 'runner',
+      count: 3,
     },
   },
 

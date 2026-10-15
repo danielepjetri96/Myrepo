@@ -42,6 +42,8 @@ const Sfx = {
   heal() { this.tone(660, 990, 0.12, 'triangle', 0.08); },
   select() { this.tone(440, 660, 0.08, 'square', 0.07); },
   deny() { this.tone(120, 100, 0.12, 'square', 0.07); },
+  warn() { [0, 0.25, 0.5, 0.75].forEach(d => this.tone(880, 880, 0.08, 'square', 0.06, d)); },
+  summon() { this.tone(90, 400, 0.4, 'sawtooth', 0.1); },
 };
 
 // ---- input: keyboard and mouse only ----
@@ -191,6 +193,8 @@ function updateRoom() {
     else if (f.type === 'kill') { Sfx.kill(); burst(f.x, f.y, '#a7f070', 10); }
     else if (f.type === 'hurt') { Sfx.hit(); shake = 0.15; }
     else if (f.type === 'heal') { Sfx.heal(); burst(f.x, f.y, '#ef4444', 6); }
+    else if (f.type === 'warn') Sfx.warn();
+    else if (f.type === 'summon') { Sfx.summon(); burst(f.x, f.y, '#ef4444', 14); }
   }
   sim.fx.length = 0;
   if (roomHelp > 0) roomHelp -= DT;
@@ -349,6 +353,7 @@ const ENEMY_ART = {
   brute: { c: '#8b5cf6', rows: ['..ccccc..', '.ccccccc.', 'cceccccec', 'ccccccccc', 'ccccccccc', '.ccccccc.', '.cc.c.cc.', '.cc...cc.'] },
   splitter: { c: '#ef7d57', rows: ['.cccc.', 'cccccc', 'ceccec', 'cccccc', '.cccc.', '.c..c.'] },
   minirunner: { c: '#ef7d57', rows: ['.cc.', 'cccc', 'cecc', '.cc.'] },
+  boss: { c: '#b13e53', rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccccccccccccc', 'ccceeccceeccc', 'ccceeccceeccc', 'ccccccccccccc', 'cccc.....cccc', 'ccccc...ccccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
 };
 const HERO = [
   '..hhhh..',
@@ -392,7 +397,8 @@ function drawRoom() {
       if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = '#a7f070'; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
       continue;
     }
-    pixels(art.rows, e.flash > 0 ? { c: '#ffffff', e: '#ffffff' } : { c: art.c, e: '#1a1c2c' }, x, y, 2);
+    const warning = e.state === 'warning' && Math.floor(e.timer * 12) % 2;   // the Boss blinks before it charges
+    pixels(art.rows, e.flash > 0 || warning ? { c: '#ffffff', e: '#ffffff' } : { c: art.c, e: e.type === 'boss' ? '#ffcd75' : '#1a1c2c' }, x, y, 2);
   }
   for (const h of sim.pickups) pixels(HEART, { r: '#ef4444' }, Math.round(h.x - cam.x - 3.5), Math.round(h.y - cam.y - 3), 1);
   for (const b of sim.bullets) { ctx.fillStyle = '#ffcd75'; ctx.fillRect(Math.round(b.x - cam.x - 1.5), Math.round(b.y - cam.y - 1.5), 3, 3); }
@@ -418,13 +424,19 @@ function drawLives() {
   if (chapterId === 'cleartheroom') {
     for (let i = 0; i < sim.player.maxHp; i++) pixels(HEART, { r: i < sim.player.hp ? '#ef4444' : '#333c57' }, 6 + i * 10, 5);
     text('LIVES ' + hud.lives, 6, 16, '#fff', 8);
-    text('ROOM ' + (sim.roomIndex + 1) + '/' + sim.roomCount, W / 2, 6, '#fff', 8, 'center');
+    if (sim.boss) drawBossBar(sim.boss);
+    else text('ROOM ' + (sim.roomIndex + 1) + '/' + sim.roomCount, W / 2, 6, '#fff', 8, 'center');
     text('LEVEL ' + hud.level + '/' + CHAPTERS.find(c => c.id === chapterId).levels, W - 6, 6, '#fff', 8, 'right');
     return;
   }
   text('LIVES', 6, 6, '#fff', 8);
   for (let i = 0; i < Progression.LIVES; i++) pixels(HEART, { r: i < hud.lives ? '#ef4444' : '#333c57' }, 46 + i * 10, 5);
   text('LEVEL ' + hud.level + '/' + JumpGuyData.levels.length, W - 6, 6, '#fff', 8, 'right');
+}
+function drawBossBar(b) {
+  text('BOSS', W / 2, 4, '#ef4444', 8, 'center');
+  ctx.fillStyle = '#000'; ctx.fillRect(100, 14, 120, 6);
+  ctx.fillStyle = '#b13e53'; ctx.fillRect(101, 15, Math.round(118 * Math.max(0, b.hp) / ClearTheRoomData.boss.hp), 4);
 }
 function drawProgressBar() {
   const p = Math.min(1, (sim.dist + JumpGuy.PLAYER_X) / sim.def.length);
