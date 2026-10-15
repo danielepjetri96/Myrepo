@@ -873,6 +873,67 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
       eq(ev, 'passed', 'seed ' + seed);
     }
   });
+
+  // ---- Boss ----
+  const mkBoss = () => ClearTheRoom.create({ layout: D.bossLayout, waves: [], boss: true });
+
+  test('ctr boss: the boss room holds one boss with the configured health and passes only once it is dead', () => {
+    const sim = mkBoss();
+    eq(sim.enemies.length, 1, 'one enemy');
+    eq(sim.boss === sim.enemies[0], true, 'it is the boss');
+    eq(sim.boss.hp, D.boss.hp);
+    eq(step(sim, {}, 60 * 3), null, 'no pass while the boss lives');
+    sim.boss.hp = 0;
+    eq(step(sim, {}, 60 * 3), 'passed');
+  });
+
+  // A boss room whose player cannot be reached by accident: far away and sturdy.
+  const mkFarBoss = () => { const sim = mkBoss(); sim.player.hp = sim.player.maxHp = 999; return sim; };
+  const secs = n => Math.round(n * 60);
+
+  test('ctr boss: chases, then stands still for a warning before each charge', () => {
+    const sim = mkFarBoss(), b = sim.boss;
+    eq(b.state, 'chase');
+    const y0 = b.y;
+    step(sim, {}, secs(4.5));
+    eq(b.state, 'chase', 'still chasing before the first charge');
+    eq(b.y > y0, true, 'it walks toward the player');
+    step(sim, {}, secs(0.7));
+    eq(b.state, 'warning', 'warning shown at about 5 s');
+    const at = { x: b.x, y: b.y };
+    step(sim, {}, secs(0.5));
+    eq({ x: b.x, y: b.y }, at, 'it does not move during the warning');
+  });
+
+  test('ctr boss: after the warning it dashes toward where the player was, at the dash speed, then chases again', () => {
+    const sim = mkFarBoss(), b = sim.boss;
+    step(sim, {}, secs(5.1));
+    eq(b.state, 'warning');
+    const toPlayer = { x: sim.player.x - b.x, y: sim.player.y - b.y }, len = Math.hypot(toPlayer.x, toPlayer.y);
+    step(sim, {}, secs(1));   // the warning ends
+    eq(b.state, 'charge');
+    const before = { x: b.x, y: b.y };
+    step(sim, {}, 1);
+    const moved = Math.hypot(b.x - before.x, b.y - before.y);
+    eq(Math.abs(moved - D.boss.charge.speed * STEP) < 0.5, true, 'dash speed, moved ' + moved);
+    const dir = { x: (b.x - before.x) / moved, y: (b.y - before.y) / moved };
+    eq(Math.abs(dir.x - toPlayer.x / len) < 0.05 && Math.abs(dir.y - toPlayer.y / len) < 0.05, true, 'dash heads for the player');
+    step(sim, {}, secs(1));
+    eq(b.state, 'chase', 'back to chasing');
+  });
+
+  test('ctr boss: touching it costs 1 health, being hit by its charge costs 2', () => {
+    const touch = state => {
+      const sim = mkBoss(), b = sim.boss;
+      b.state = state; b.timer = 1; b.dirX = 0; b.dirY = 0;
+      sim.player.x = b.x; sim.player.y = b.y;
+      const hp = sim.player.hp;
+      step(sim, {}, 1);
+      return hp - sim.player.hp;
+    };
+    eq(touch('chase'), 1, 'chasing');
+    eq(touch('charge'), D.boss.charge.damage, 'charging');
+  });
 }
 
 // ---- report ----

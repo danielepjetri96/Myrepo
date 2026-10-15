@@ -105,7 +105,7 @@ const ClearTheRoom = {
   // layout: rows of characters; waves: result of buildWaves (spawn points are used in a fixed, distance-based order).
   // final: the last room of a level (clearing it passes the level); otherwise clearing it opens the doors.
   // carry: the player of the previous room; its health and invulnerability time carry over.
-  create({ layout, waves, final = true, carry, rng }) {
+  create({ layout, waves, final = true, boss = false, carry, rng }) {
     const D = ClearTheRoomData, P = D.player;
     rng = rng || Math.random;
     const room = ClearTheRoom.parseLayout(layout);
@@ -122,6 +122,7 @@ const ClearTheRoom = {
       waveTimer: D.waveDelay,
       clearTimer: ClearTheRoom.CLEAR_DELAY,
       time: 0,
+      boss: null,             // the Boss, in the Boss room only (also listed in enemies)
 
       // input: { moveX, moveY (-1..1), aimX, aimY (room coordinates), fire }.
       // Returns 'passed' (final room cleared), 'lost', or 'exit' (player walked through an open door).
@@ -185,7 +186,7 @@ const ClearTheRoom = {
 
       // Enemies that split spawn their children; some enemies leave a heart.
       onKill(e) {
-        const def = D.enemies[e.type];
+        const def = D.enemies[e.type] || D.boss;
         if (def.splits) {
           // Children appear on opposite sides of the corpse (when there is room) and blink briefly before they attack.
           for (let k = 0; k < def.splits.count; k++) {
@@ -199,8 +200,10 @@ const ClearTheRoom = {
       },
 
       makeEnemy(id, x, y, spawnT) {
-        const def = D.enemies[id];
-        return { type: id, x, y, size: def.size, hp: def.hp, speed: def.speed, damage: def.damage, spawnT, flash: 0 };
+        const def = D.enemies[id] || D.boss;
+        const e = { type: id, x, y, size: def.size, hp: def.hp, speed: def.speed, damage: def.damage, spawnT, flash: 0 };
+        if (id === 'boss') { e.state = 'chase'; e.timer = def.charge.every; }
+        return e;
       },
 
       // Hearts are picked up by touching them, but only when there is health to restore.
@@ -218,25 +221,50 @@ const ClearTheRoom = {
         for (const e of sim.enemies) {
           e.flash = Math.max(0, (e.flash || 0) - dt);
           if (e.spawnT > 0) { e.spawnT -= dt; continue; }
-          const [dx, dy] = sim.chaseVector(e);
-          const d = Math.hypot(dx, dy) || 1;
-          let vx = dx / d, vy = dy / d;
-          for (const o of sim.enemies) { // keep enemies from stacking on each other
-            if (o === e || o.spawnT > 0) continue;
-            const sx = e.x - o.x, sy = e.y - o.y, sd = Math.hypot(sx, sy);
-            if (sd > 0 && sd < e.size) { vx += (sx / sd) * 0.8; vy += (sy / sd) * 0.8; }
-          }
-          const vl = Math.hypot(vx, vy) || 1;
-          sim.move(e, (vx / vl) * e.speed * dt, (vy / vl) * e.speed * dt);
+          if (e.type === 'boss') sim.updateBoss(e, dt); else sim.chase(e, dt);
 
           if (p.invuln <= 0 && Math.abs(p.x - e.x) < (p.size + e.size) / 2 - 1 && Math.abs(p.y - e.y) < (p.size + e.size) / 2 - 1) {
-            p.hp -= e.damage;
+            p.hp -= e.state === 'charge' ? D.boss.charge.damage : e.damage;
             p.invuln = P.invuln;
             sim.fx.push({ type: 'hurt', x: p.x, y: p.y });
             if (p.hp <= 0) return true;
           }
         }
         return false;
+      },
+
+      // One step of walking toward the player, nudged away from enemies that are too close.
+      chase(e, dt) {
+        const [dx, dy] = sim.chaseVector(e);
+        const d = Math.hypot(dx, dy) || 1;
+        let vx = dx / d, vy = dy / d;
+        for (const o of sim.enemies) { // keep enemies from stacking on each other
+          if (o === e || o.spawnT > 0) continue;
+          const sx = e.x - o.x, sy = e.y - o.y, sd = Math.hypot(sx, sy);
+          if (sd > 0 && sd < e.size) { vx += (sx / sd) * 0.8; vy += (sy / sd) * 0.8; }
+        }
+        const vl = Math.hypot(vx, vy) || 1;
+        sim.move(e, (vx / vl) * e.speed * dt, (vy / vl) * e.speed * dt);
+      },
+
+      // The Boss alternates chasing with a charge: chase, stand still and blink (warning), then dash.
+      updateBoss(e, dt) {
+        const C = D.boss.charge;
+        e.timer -= dt;
+        if (e.state === 'chase') {
+          sim.chase(e, dt);
+          if (e.timer <= 0) {
+            // The dash direction is fixed when the warning starts, so the player can step out of the way.
+            const dx = sim.player.x - e.x, dy = sim.player.y - e.y, d = Math.hypot(dx, dy) || 1;
+            e.dirX = dx / d; e.dirY = dy / d;
+            e.state = 'warning'; e.timer = C.warning;
+          }
+        } else if (e.state === 'warning') {
+          if (e.timer <= 0) { e.state = 'charge'; e.timer = C.duration; }
+        } else {
+          sim.move(e, e.dirX * C.speed * dt, e.dirY * C.speed * dt);
+          if (e.timer <= 0) { e.state = 'chase'; e.timer = C.every; }
+        }
       },
 
       // Direction an enemy walks to reach the player: straight when nothing is in the way,
@@ -306,6 +334,11 @@ const ClearTheRoom = {
         });
       },
     };
+    if (boss) {
+      const at = room.spawns[0];
+      sim.boss = sim.makeEnemy('boss', at.x, at.y, 0);
+      sim.enemies.push(sim.boss);
+    }
     return sim;
   },
 };

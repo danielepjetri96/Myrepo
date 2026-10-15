@@ -33,6 +33,22 @@ const ClearTheRoomData = {
     { rooms: 6, waves: 3,      perWave: [6, 8], types: { grunt: 3, runner: 3, brute: 2, splitter: 2 } },
   ],
 
+  // The Boss waits alone in the last room of the last level. Touching it hurts for `damage`; its charge hurts for `charge.damage`.
+  boss: {
+    hp: 80,
+    speed: 30,          // px/s while chasing
+    damage: 1,
+    size: 26,
+    dropChance: 0,
+    charge: {
+      every: 5,         // s of chasing between two charges
+      warning: 1,       // s the Boss stands still and blinks before it dashes
+      duration: 0.8,    // s the dash lasts
+      speed: 160,       // px/s during the dash
+      damage: 2,
+    },
+  },
+
   waveDelay: 1,         // s between a cleared wave and the next one
   spawnWarning: 0.6,    // s an enemy blinks at its spawn point before it becomes active
   splitWarning: 0.25,   // same, for the children of a splitter
@@ -221,5 +237,28 @@ const ClearTheRoomData = {
       "#S............................S#",
       "################################",
     ],
+  ],
+
+  // The Boss arena: a wide open room with a few pillars, the player at the bottom and the Boss's spawn point ('S') at the top.
+  // No exit door: clearing the Boss ends the level.
+  bossLayout: [
+    "################################",
+    "#..............................#",
+    "#..............S...............#",
+    "#..............................#",
+    "#..............................#",
+    "#....##..................##....#",
+    "#....##..................##....#",
+    "#..............................#",
+    "#..............................#",
+    "#..............................#",
+    "#..............................#",
+    "#....##..................##....#",
+    "#....##..................##....#",
+    "#..............................#",
+    "#..............................#",
+    "#..............................#",
+    "#..............P...............#",
+    "################################",
   ],
 };
