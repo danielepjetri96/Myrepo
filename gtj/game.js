@@ -120,7 +120,7 @@ const ENDLESS = {
   cleartheroom: { create: () => ClearTheRoom.createEndless({}), score: s => s.roomsCleared, unit: ' ROOMS', result: n => 'ROOMS CLEARED: ' + n },
   onetowerdefense: {
     create: () => OneTower.createEndless({}), score: s => s.wavesCleared, unit: ' WAVES', result: n => 'WAVES CLEARED: ' + n,
-    hud: s => text('WAVE ' + Math.max(1, s.waveIndex), W / 2, 6, '#fff', 8, 'center'),
+    hud: s => text('WAVE ' + Math.max(1, s.waveIndex), W / 2, 6, COLORS.white, 8, 'center'),
     // every few waves the run pauses for an upgrade, taken by the simulation itself, then play resumes
     upgradeChoice: s => upgradeChoiceOf(s.wavesCleared + ' WAVES HELD!', '+' + OneTowerData.endless.heal + ' TOWER HEALTH',
       OneTower.offerUpgrades({ spells: s.spells, taken: s.upgrades }),
@@ -233,17 +233,17 @@ const PLAY = {
 function playFx() {
   for (const f of sim.fx) {
     if (f.type === 'shoot') Sfx.shoot();
-    else if (f.type === 'hit') { Sfx.enemyHit(); burst(f.x, f.y, '#a7f070', 3); }
-    else if (f.type === 'kill') { Sfx.kill(); burst(f.x, f.y, '#a7f070', 10); }
+    else if (f.type === 'hit') { Sfx.enemyHit(); burst(f.x, f.y, COLORS.lime, 3); }
+    else if (f.type === 'kill') { Sfx.kill(); burst(f.x, f.y, COLORS.lime, 10); }
     else if (f.type === 'hurt') { Sfx.hit(); shake = 0.15; }
-    else if (f.type === 'heal') { Sfx.heal(); burst(f.x, f.y, '#ef4444', 6); }
+    else if (f.type === 'heal') { Sfx.heal(); burst(f.x, f.y, COLORS.red, 6); }
     else if (f.type === 'warn') Sfx.warn();
-    else if (f.type === 'summon') { Sfx.summon(); burst(f.x, f.y, '#ef4444', 14); }
+    else if (f.type === 'summon') { Sfx.summon(); burst(f.x, f.y, COLORS.red, 14); }
     else if (f.type === 'deny') Sfx.deny();
-    else if (f.type === 'cast') { Sfx.cast(f.spell); if (f.spell === 'frost') sparks.push({ ring: true, x: f.x, y: f.y, r: sim.stats.spells.frost.radius, color: '#73eff7', life: 0.4 }); }
-    else if (f.type === 'blast') { Sfx.boom(); burst(f.x, f.y, '#ef7d57', 14); sparks.push({ ring: true, x: f.x, y: f.y, r: f.radius, color: '#ffcd75', life: 0.25 }); }
-    else if (f.type === 'lightning') sparks.push({ points: [{ x: f.x, y: f.y }, ...f.points], color: '#ffffff', life: 0.2 });
-    else if (f.type === 'zap') sparks.push({ points: [{ x: f.x, y: f.y }, { x: f.tx, y: f.ty }], color: '#b55dff', life: 0.15 });
+    else if (f.type === 'cast') { Sfx.cast(f.spell); if (f.spell === 'frost') sparks.push({ ring: true, x: f.x, y: f.y, r: sim.stats.spells.frost.radius, color: COLORS.cyan, life: 0.4 }); }
+    else if (f.type === 'blast') { Sfx.boom(); burst(f.x, f.y, COLORS.orange, 14); sparks.push({ ring: true, x: f.x, y: f.y, r: f.radius, color: COLORS.yellow, life: 0.25 }); }
+    else if (f.type === 'lightning') sparks.push({ points: [{ x: f.x, y: f.y }, ...f.points], color: COLORS.white, life: 0.2 });
+    else if (f.type === 'zap') sparks.push({ points: [{ x: f.x, y: f.y }, { x: f.tx, y: f.ty }], color: COLORS.purple, life: 0.15 });
   }
   for (const k of sparks) k.life -= DT;
   sparks = sparks.filter(k => k.life > 0);
@@ -349,11 +349,20 @@ function update() {
 }
 
 // ---- drawing ----
+// Text in the pixel font, from its top edge, with a dark shadow. size 8 is the font at 1x; 16 doubles it, 20+ triples it.
 function text(s, x, y, color, size, align) {
-  ctx.font = 'bold ' + (size || 8) + "px 'Courier New', monospace";
-  ctx.textAlign = align || 'left'; ctx.textBaseline = 'top';
-  ctx.fillStyle = '#000'; ctx.fillText(s, Math.round(x) + 1, Math.round(y) + 1);
-  ctx.fillStyle = color || '#fff'; ctx.fillText(s, Math.round(x), Math.round(y));
+  s = String(s);
+  const k = Math.max(1, Math.round((size || 8) / 8)), w = PixelFont.width(s) * k;
+  const x0 = Math.round(x) - (align === 'center' ? Math.round(w / 2) : align === 'right' ? w : 0), y0 = Math.round(y);
+  for (const [c, d] of [[COLORS.black, k], [color || COLORS.white, 0]]) {   // the shadow first, then the letters
+    ctx.fillStyle = c;
+    PixelFont.draw(s, (px, py) => ctx.fillRect(x0 + px * k + d, y0 + py * k + d, k, k));
+  }
+}
+// A palette color made see-through, for overlays.
+function withAlpha(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
 }
 function pixels(rows, pal, x, y, s) {
   s = s || 1;
@@ -376,19 +385,19 @@ const RUNNER = [
   '.dd..dd.',
 ];
 const RUNNER2 = RUNNER.slice(0, 8).concat(['..bb.bb.', '..dd.dd.']);
-const PAL = { h: '#b13e53', s: '#ffcd75', e: '#1a1c2c', b: '#3b5dc9', d: '#333c57' };
+const PAL = { h: COLORS.red, s: COLORS.yellow, e: COLORS.black, b: COLORS.blue, d: COLORS.slate };
 const SPIKE = ['...#...', '..###..', '..###..', '.#####.', '.#####.', '#######', '#######'];
 const HEART = ['.rr.rr.', 'rrrrrrr', 'rrrrrrr', '.rrrrr.', '..rrr..', '...r...'];
 
 function drawBackground(dist) {
-  ctx.fillStyle = '#29366f'; ctx.fillRect(0, 0, W, 70);
-  ctx.fillStyle = '#3b5dc9'; ctx.fillRect(0, 70, W, 40);
-  ctx.fillStyle = '#41a6f6'; ctx.fillRect(0, 110, W, 30);
+  ctx.fillStyle = COLORS.navy; ctx.fillRect(0, 0, W, 70);
+  ctx.fillStyle = COLORS.blue; ctx.fillRect(0, 70, W, 40);
+  ctx.fillStyle = COLORS.sky; ctx.fillRect(0, 110, W, 30);
   // two hill layers with parallax, drawn as 3px columns
   for (let layer = 0; layer < 2; layer++) {
     const speed = layer ? 0.5 : 0.2, height = layer ? 26 : 38, base = JumpGuy.GROUND - (layer ? 0 : 14);
     const off = (dist * speed) % 160;
-    ctx.fillStyle = layer ? '#38b764' : '#257179';
+    ctx.fillStyle = layer ? COLORS.green : COLORS.teal;
     for (let x = -160; x < W + 160; x += 80) {
       const hx = x - off + (layer ? 40 : 0);
       for (let i = 0; i < 30; i++) {
@@ -400,9 +409,9 @@ function drawBackground(dist) {
 }
 function drawGround(dist) {
   const g = JumpGuy.GROUND;
-  ctx.fillStyle = '#566c86'; ctx.fillRect(0, g, W, H - g);
-  ctx.fillStyle = '#73eff7'; ctx.fillRect(0, g, W, 2);
-  ctx.fillStyle = '#333c57';
+  ctx.fillStyle = COLORS.grey; ctx.fillRect(0, g, W, H - g);
+  ctx.fillStyle = COLORS.cyan; ctx.fillRect(0, g, W, 2);
+  ctx.fillStyle = COLORS.slate;
   const off = Math.floor(dist) % 16;
   for (let x = -off; x < W; x += 16) { ctx.fillRect(x, g + 10, 8, 2); ctx.fillRect(x + 8, g + 24, 8, 2); }
 }
@@ -413,15 +422,15 @@ function drawLevel() {
   drawGround(sim.dist);
   const fx = Math.round(sim.def.length - sim.dist);
   if (fx > -30 && fx < W + 20) {
-    ctx.fillStyle = '#f4f4f4'; ctx.fillRect(fx, J.GROUND - 56, 2, 56);
+    ctx.fillStyle = COLORS.white; ctx.fillRect(fx, J.GROUND - 56, 2, 56);
     for (let j = 0; j < 4; j++) for (let i = 0; i < 6; i++) {
-      ctx.fillStyle = (i + j) % 2 ? '#f4f4f4' : '#1a1c2c'; ctx.fillRect(fx + 2 + i * 4, J.GROUND - 56 + j * 4, 4, 4);
+      ctx.fillStyle = (i + j) % 2 ? COLORS.white : COLORS.black; ctx.fillRect(fx + 2 + i * 4, J.GROUND - 56 + j * 4, 4, 4);
     }
-    text('FINISH', fx - 8, J.GROUND - 70, '#ffcd75', 8);
+    text('FINISH', fx - 8, J.GROUND - 70, COLORS.yellow, 8);
   }
   for (const o of sim.def.obstacles) {
     const ox = Math.round(o.x - sim.dist);
-    if (ox > -20 && ox < W) pixels(SPIKE, { '#': '#ef7d57' }, ox, J.GROUND - o.h, 2);
+    if (ox > -20 && ox < W) pixels(SPIKE, { '#': COLORS.orange }, ox, J.GROUND - o.h, 2);
   }
   const flashHidden = scene === 'dying' && Math.floor(sceneTime * 20) % 2 === 1;
   if (!flashHidden) {
@@ -432,12 +441,12 @@ function drawLevel() {
 
 // Enemy art: pixel rows drawn at 2x, centered on the enemy. Letter c is the body color, e the eyes (dark unless set).
 const ENEMY_ART = {
-  grunt: { c: '#38b764', rows: ['.cccccc.', 'cccccccc', 'ceccccec', 'cccccccc', '.cccccc.', '.c.cc.c.'] },
-  runner: { c: '#ef4444', rows: ['.ccc.', 'ccccc', 'cecec', 'ccccc', '.c.c.'] },
-  brute: { c: '#8b5cf6', rows: ['..ccccc..', '.ccccccc.', 'cceccccec', 'ccccccccc', 'ccccccccc', '.ccccccc.', '.cc.c.cc.', '.cc...cc.'] },
-  splitter: { c: '#ef7d57', rows: ['.cccc.', 'cccccc', 'ceccec', 'cccccc', '.cccc.', '.c..c.'] },
-  minirunner: { c: '#ef7d57', rows: ['.cc.', 'cccc', 'cecc', '.cc.'] },
-  boss: { c: '#b13e53', e: '#ffcd75', rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccccccccccccc', 'ccceeccceeccc', 'ccceeccceeccc', 'ccccccccccccc', 'cccc.....cccc', 'ccccc...ccccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
+  grunt: { c: COLORS.green, rows: ['.cccccc.', 'cccccccc', 'ceccccec', 'cccccccc', '.cccccc.', '.c.cc.c.'] },
+  runner: { c: COLORS.red, rows: ['.ccc.', 'ccccc', 'cecec', 'ccccc', '.c.c.'] },
+  brute: { c: COLORS.purple, rows: ['..ccccc..', '.ccccccc.', 'cceccccec', 'ccccccccc', 'ccccccccc', '.ccccccc.', '.cc.c.cc.', '.cc...cc.'] },
+  splitter: { c: COLORS.orange, rows: ['.cccc.', 'cccccc', 'ceccec', 'cccccc', '.cccc.', '.c..c.'] },
+  minirunner: { c: COLORS.orange, rows: ['.cc.', 'cccc', 'cecc', '.cc.'] },
+  boss: { c: COLORS.red, e: COLORS.yellow, rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccccccccccccc', 'ccceeccceeccc', 'ccceeccceeccc', 'ccccccccccccc', 'cccc.....cccc', 'ccccc...ccccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
 };
 const HERO = [
   '..hhhh..',
@@ -465,39 +474,39 @@ const TOWER = [
 ];
 // One Tower Defense art: pixel rows drawn at 2x, centered on the enemy. Letter c is the body color, e the eyes.
 const FIELD_ART = {
-  goblin: { c: '#38b764', rows: ['c......c', '.cccccc.', 'cceccecc', '.cccccc.', '..cccc..', '.cc..cc.'] },
-  wolf:   { c: '#94a3b8', rows: ['c.......', 'cc..cccc', '.ccccecc', '.cccccc.', '.c.c.c.c'] },
-  orc:    { c: '#257179', rows: ['..ccccc..', '.ccccccc.', 'ccecccecc', 'ccccccccc', 'c.ccccc.c', '.ccccccc.', '.cc...cc.', '.cc...cc.'] },
-  shaman: { c: '#b55dff', rows: ['..cc.y', '.cccc|', 'cecce|', '.cccc|', '.c..c|'] },
-  boss:   { c: '#b13e53', rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccceecccceecc', 'ccceecccceecc', 'ccccccccccccc', 'cccc.....cccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
+  goblin: { c: COLORS.green, rows: ['c......c', '.cccccc.', 'cceccecc', '.cccccc.', '..cccc..', '.cc..cc.'] },
+  wolf:   { c: COLORS.silver, rows: ['c.......', 'cc..cccc', '.ccccecc', '.cccccc.', '.c.c.c.c'] },
+  orc:    { c: COLORS.teal, rows: ['..ccccc..', '.ccccccc.', 'ccecccecc', 'ccccccccc', 'c.ccccc.c', '.ccccccc.', '.cc...cc.', '.cc...cc.'] },
+  shaman: { c: COLORS.purple, rows: ['..cc.y', '.cccc|', 'cecce|', '.cccc|', '.c..c|'] },
+  boss:   { c: COLORS.red, rows: ['c...........c', 'cc..ccccc..cc', '.ccccccccccc.', 'ccceecccceecc', 'ccceecccceecc', 'ccccccccccccc', 'cccc.....cccc', '.ccccccccccc.', '.ccc.ccc.ccc.', '.cc...c...cc.', '.cc.......cc.'] },
 };
 
 function ring(x, y, r, color) { ctx.strokeStyle = color; ctx.beginPath(); ctx.arc(Math.round(x), Math.round(y), r, 0, Math.PI * 2); ctx.stroke(); }
 
 function drawField() {
-  ctx.fillStyle = '#5a8f3c'; ctx.fillRect(0, 0, W, H);
-  for (let j = 0; j < H; j += 12) for (let i = (j / 12) % 2 * 6; i < W; i += 12) { ctx.fillStyle = '#4f8235'; ctx.fillRect(i, j, 2, 2); }
+  ctx.fillStyle = COLORS.green; ctx.fillRect(0, 0, W, H);
+  for (let j = 0; j < H; j += 12) for (let i = (j / 12) % 2 * 6; i < W; i += 12) { ctx.fillStyle = COLORS.teal; ctx.fillRect(i, j, 2, 2); }
   // burning ground and falling meteors (a blinking circle where it will land)
-  for (const f of sim.fires) { ctx.fillStyle = 'rgba(239,125,87,0.35)'; ctx.beginPath(); ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2); ctx.fill(); }
-  for (const m of sim.meteors) if (Math.floor(m.t * 10) % 2 === 0) ring(m.x, m.y, sim.stats.spells.meteor.radius, '#ef4444');
+  for (const f of sim.fires) { ctx.fillStyle = withAlpha(COLORS.orange, 0.35); ctx.beginPath(); ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2); ctx.fill(); }
+  for (const m of sim.meteors) if (Math.floor(m.t * 10) % 2 === 0) ring(m.x, m.y, sim.stats.spells.meteor.radius, COLORS.red);
   const t = sim.tower;
-  ctx.fillStyle = '#7c6a4f'; ctx.fillRect(t.x - t.size / 2 - 2, t.y - t.size / 2 - 2, t.size + 4, t.size + 4);   // the ground the enemies stop at
-  pixels(TOWER, { b: '#3b5dc9', w: '#c2c3c7', g: '#1a1c2c', d: '#b13e53' }, Math.round(t.x - 15), Math.round(t.y - 22), 3);
+  ctx.fillStyle = COLORS.grey; ctx.fillRect(t.x - t.size / 2 - 2, t.y - t.size / 2 - 2, t.size + 4, t.size + 4);   // the ground the enemies stop at
+  pixels(TOWER, { b: COLORS.blue, w: COLORS.silver, g: COLORS.black, d: COLORS.red }, Math.round(t.x - 15), Math.round(t.y - 22), 3);
   // Salute bar under the Torretta
-  ctx.fillStyle = '#000'; ctx.fillRect(t.x - 16, t.y + t.size / 2 + 4, 32, 4);
-  ctx.fillStyle = t.hp > t.maxHp * 0.3 ? '#a7f070' : '#ef4444'; ctx.fillRect(t.x - 15, t.y + t.size / 2 + 5, Math.round(30 * Math.max(0, t.hp) / t.maxHp), 2);
+  ctx.fillStyle = COLORS.black; ctx.fillRect(t.x - 16, t.y + t.size / 2 + 4, 32, 4);
+  ctx.fillStyle = t.hp > t.maxHp * 0.3 ? COLORS.lime : COLORS.red; ctx.fillRect(t.x - 15, t.y + t.size / 2 + 5, Math.round(30 * Math.max(0, t.hp) / t.maxHp), 2);
   for (const e of sim.enemies) {
     const art = FIELD_ART[e.type], w = art.rows[0].length * 2, h = art.rows.length * 2;
     const x = Math.round(e.x - w / 2), y = Math.round(e.y - h / 2);
     if (e.spawnT > 0) {
-      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = '#ffcd75'; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
+      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = COLORS.yellow; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
       continue;
     }
-    const body = e.flash > 0 ? '#ffffff' : e.slowT > 0 ? '#73eff7' : art.c;   // white when hit, icy while slowed
-    pixels(art.rows, { c: body, e: e.flash > 0 ? '#ffffff' : '#ef4444', y: '#ffcd75', '|': '#7c6a4f' }, x, y, 2);
+    const body = e.flash > 0 ? COLORS.white : e.slowT > 0 ? COLORS.cyan : art.c;   // white when hit, icy while slowed
+    pixels(art.rows, { c: body, e: e.flash > 0 ? COLORS.white : COLORS.red, y: COLORS.yellow, '|': COLORS.grey }, x, y, 2);
   }
-  for (const b of sim.bolts) { ctx.fillStyle = '#73eff7'; ctx.fillRect(Math.round(b.x - 1.5), Math.round(b.y - 1.5), 3, 3); }
-  for (const f of sim.fireballs) { ctx.fillStyle = '#ef7d57'; ctx.fillRect(Math.round(f.x - 3), Math.round(f.y - 3), 6, 6); ctx.fillStyle = '#ffcd75'; ctx.fillRect(Math.round(f.x - 1), Math.round(f.y - 1), 2, 2); }
+  for (const b of sim.bolts) { ctx.fillStyle = COLORS.cyan; ctx.fillRect(Math.round(b.x - 1.5), Math.round(b.y - 1.5), 3, 3); }
+  for (const f of sim.fireballs) { ctx.fillStyle = COLORS.orange; ctx.fillRect(Math.round(f.x - 3), Math.round(f.y - 3), 6, 6); ctx.fillStyle = COLORS.yellow; ctx.fillRect(Math.round(f.x - 1), Math.round(f.y - 1), 2, 2); }
   for (const k of sparks) {
     if (k.ring) { ring(k.x, k.y, k.r, k.color); continue; }
     ctx.strokeStyle = k.color; ctx.beginPath(); ctx.moveTo(k.points[0].x, k.points[0].y);
@@ -506,42 +515,42 @@ function drawField() {
   }
   for (const q of particles) { ctx.fillStyle = q.color; ctx.fillRect(Math.round(q.x), Math.round(q.y), 2, 2); }
   if (scene === 'play') {
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = COLORS.white;
     ctx.fillRect(Math.round(mouse.x) - 3, Math.round(mouse.y), 7, 1); ctx.fillRect(Math.round(mouse.x), Math.round(mouse.y) - 3, 1, 7);
   }
   // spell bar: keys 1-5, the selected one highlighted, a dark cover shrinking while a spell recharges
   OneTower.SPELLS.forEach((id, i) => {
     const x = W / 2 - 37 + i * 15, y = H - 14, on = sim.spells.includes(id), sel = sim.selected === id;
-    ctx.fillStyle = sel ? '#ffcd75' : '#1a1c2c'; ctx.fillRect(x - 1, y - 1, 14, 13);
-    ctx.fillStyle = on ? '#3b5dc9' : '#333c57'; ctx.fillRect(x, y, 12, 11);
+    ctx.fillStyle = sel ? COLORS.yellow : COLORS.black; ctx.fillRect(x - 1, y - 1, 14, 13);
+    ctx.fillStyle = on ? COLORS.blue : COLORS.slate; ctx.fillRect(x, y, 12, 11);
     const left = id === 'bolt' ? 0 : Math.max(0, sim.recharge[id]) / sim.stats.spells[id].recharge;
-    if (on && left > 0) { ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y, 12, Math.ceil(11 * left)); }
-    text(String(i + 1), x + 6, y + 2, on ? '#fff' : '#566c86', 8, 'center');
+    if (on && left > 0) { ctx.fillStyle = withAlpha(COLORS.black, 0.6); ctx.fillRect(x, y, 12, Math.ceil(11 * left)); }
+    text(String(i + 1), x + 6, y + 2, on ? COLORS.white : COLORS.grey, 8, 'center');
   });
-  text(sim.selected.toUpperCase(), W / 2, H - 25, '#fff', 8, 'center');
+  text(sim.selected.toUpperCase(), W / 2, H - 25, COLORS.white, 8, 'center');
 }
 
 function drawRoom() {
   const cam = camera(), r = sim.room, T = ClearTheRoom.TILE;
-  ctx.fillStyle = '#1a1c2c'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = COLORS.black; ctx.fillRect(0, 0, W, H);
   const i0 = Math.floor(cam.x / T), i1 = Math.ceil((cam.x + W) / T), j0 = Math.floor(cam.y / T), j1 = Math.ceil((cam.y + H) / T);
   for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
     const x = Math.round(i * T - cam.x), y = Math.round(j * T - cam.y);
     if (r.inDoor(x + cam.x + 1, y + cam.y + 1)) {
       if (r.solid[j][i]) { // closed door
-        ctx.fillStyle = '#b13e53'; ctx.fillRect(x, y, T, T);
-        ctx.fillStyle = '#ef7d57'; ctx.fillRect(x + 2, y + 2, T - 4, T - 4);
-        ctx.fillStyle = '#b13e53'; ctx.fillRect(x + 8, y + 2, 4, T - 4);
+        ctx.fillStyle = COLORS.red; ctx.fillRect(x, y, T, T);
+        ctx.fillStyle = COLORS.orange; ctx.fillRect(x + 2, y + 2, T - 4, T - 4);
+        ctx.fillStyle = COLORS.red; ctx.fillRect(x + 8, y + 2, 4, T - 4);
       } else {            // open door
-        ctx.fillStyle = '#0d0e17'; ctx.fillRect(x, y, T, T);
-        ctx.fillStyle = '#a7f070'; ctx.fillRect(x + 8, y + 8, 4, 4);
+        ctx.fillStyle = COLORS.black; ctx.fillRect(x, y, T, T);
+        ctx.fillStyle = COLORS.lime; ctx.fillRect(x + 8, y + 8, 4, 4);
       }
     } else if (r.solid[j] && r.solid[j][i]) {
-      ctx.fillStyle = '#566c86'; ctx.fillRect(x, y, T, T);
-      ctx.fillStyle = '#94a3b8'; ctx.fillRect(x, y, T, 2);
-      ctx.fillStyle = '#333c57'; ctx.fillRect(x, y + T - 3, T, 3);
+      ctx.fillStyle = COLORS.grey; ctx.fillRect(x, y, T, T);
+      ctx.fillStyle = COLORS.silver; ctx.fillRect(x, y, T, 2);
+      ctx.fillStyle = COLORS.slate; ctx.fillRect(x, y + T - 3, T, 3);
     } else {
-      ctx.fillStyle = (i + j) % 2 ? '#29366f' : '#2f3d7c'; ctx.fillRect(x, y, T, T);
+      ctx.fillStyle = (i + j) % 2 ? COLORS.navy : COLORS.slate; ctx.fillRect(x, y, T, T);
     }
   }
   // enemies (blinking outline while they spawn)
@@ -549,78 +558,78 @@ function drawRoom() {
     const art = ENEMY_ART[e.type] || ENEMY_ART.grunt, w = art.rows[0].length * 2, h = art.rows.length * 2;
     const x = Math.round(e.x - cam.x - w / 2), y = Math.round(e.y - cam.y - h / 2);
     if (e.spawnT > 0) {
-      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = '#a7f070'; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
+      if (Math.floor(e.spawnT * 15) % 2) { ctx.strokeStyle = COLORS.lime; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
       continue;
     }
     const warning = e.state === 'warning' && Math.floor(e.timer * 12) % 2;   // the Boss blinks before it charges
-    pixels(art.rows, e.flash > 0 || warning ? { c: '#ffffff', e: '#ffffff' } : { c: art.c, e: art.e || '#1a1c2c' }, x, y, 2);
+    pixels(art.rows, e.flash > 0 || warning ? { c: COLORS.white, e: COLORS.white } : { c: art.c, e: art.e || COLORS.black }, x, y, 2);
   }
-  for (const h of sim.pickups) pixels(HEART, { r: '#ef4444' }, Math.round(h.x - cam.x - 3.5), Math.round(h.y - cam.y - 3), 1);
-  for (const b of sim.bullets) { ctx.fillStyle = '#ffcd75'; ctx.fillRect(Math.round(b.x - cam.x - 1.5), Math.round(b.y - cam.y - 1.5), 3, 3); }
+  for (const h of sim.pickups) pixels(HEART, { r: COLORS.red }, Math.round(h.x - cam.x - 3.5), Math.round(h.y - cam.y - 3), 1);
+  for (const b of sim.bullets) { ctx.fillStyle = COLORS.yellow; ctx.fillRect(Math.round(b.x - cam.x - 1.5), Math.round(b.y - cam.y - 1.5), 3, 3); }
   // player (blinks while invulnerable)
   const p = sim.player;
   if (!(p.invuln > 0 && Math.floor(p.invuln * 15) % 2)) pixels(HERO, PAL, Math.round(p.x - cam.x - 8), Math.round(p.y - cam.y - 8), 2);
   for (const q of particles) { ctx.fillStyle = q.color; ctx.fillRect(Math.round(q.x - cam.x), Math.round(q.y - cam.y), 2, 2); }
   // crosshair at the mouse position
   if (scene === 'play') {
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = COLORS.white;
     ctx.fillRect(Math.round(mouse.x) - 3, Math.round(mouse.y), 7, 1); ctx.fillRect(Math.round(mouse.x), Math.round(mouse.y) - 3, 1, 7);
   }
-  if (sim.fade > 0) { ctx.fillStyle = 'rgba(0,0,0,' + sim.fade + ')'; ctx.fillRect(0, 0, W, H); }
+  if (sim.fade > 0) { ctx.fillStyle = withAlpha(COLORS.black, sim.fade); ctx.fillRect(0, 0, W, H); }
 }
 
 function drawLives() {
   const c = PLAY[chapterId];
-  if (c.hearts) for (let i = 0; i < sim.player.maxHp; i++) pixels(HEART, { r: i < sim.player.hp ? '#ef4444' : '#333c57' }, 6 + i * 10, 5);
+  if (c.hearts) for (let i = 0; i < sim.player.maxHp; i++) pixels(HEART, { r: i < sim.player.hp ? COLORS.red : COLORS.slate }, 6 + i * 10, 5);
   if (mode === 'endless') {
     const e = ENDLESS[chapterId];
-    text('ONE LIFE', 6, c.hearts ? 16 : 6, '#fff', 8);
-    text(e.score(sim) + e.unit, W - 6, 6, '#fff', 8, 'right');
-    text('BEST ' + progression.record(chapterId) + e.unit, W - 6, 18, '#ffcd75', 8, 'right');
+    text('ONE LIFE', 6, c.hearts ? 16 : 6, COLORS.white, 8);
+    text(e.score(sim) + e.unit, W - 6, 6, COLORS.white, 8, 'right');
+    text('BEST ' + progression.record(chapterId) + e.unit, W - 6, 18, COLORS.yellow, 8, 'right');
     if (e.hud) e.hud(sim);
     return;
   }
   c.hud();
 }
-const drawLevelCount = () => text('LEVEL ' + hud.level + '/' + CHAPTERS.find(c => c.id === chapterId).levels, W - 6, 6, '#fff', 8, 'right');
+const drawLevelCount = () => text('LEVEL ' + hud.level + '/' + CHAPTERS.find(c => c.id === chapterId).levels, W - 6, 6, COLORS.white, 8, 'right');
 function drawLivesAndLevel() {
-  text('LIVES', 6, 6, '#fff', 8);
-  for (let i = 0; i < Progression.LIVES; i++) pixels(HEART, { r: i < hud.lives ? '#ef4444' : '#333c57' }, 46 + i * 10, 5);
+  text('LIVES', 6, 6, COLORS.white, 8);
+  for (let i = 0; i < Progression.LIVES; i++) pixels(HEART, { r: i < hud.lives ? COLORS.red : COLORS.slate }, 46 + i * 10, 5);
   drawLevelCount();
 }
 function drawRoomHud() {
-  text('LIVES ' + hud.lives, 6, 16, '#fff', 8);
+  text('LIVES ' + hud.lives, 6, 16, COLORS.white, 8);
   if (sim.boss) drawBossBar(sim.boss);
-  else text('ROOM ' + (sim.roomIndex + 1) + '/' + sim.roomCount, W / 2, 6, '#fff', 8, 'center');
+  else text('ROOM ' + (sim.roomIndex + 1) + '/' + sim.roomCount, W / 2, 6, COLORS.white, 8, 'center');
   drawLevelCount();
 }
 function drawFieldHud() {
   drawLivesAndLevel();
   if (sim.boss) drawBossBar(sim.boss);
-  else text('WAVE ' + Math.max(1, sim.waveIndex) + '/' + sim.waveCount, W / 2, 6, '#fff', 8, 'center');
+  else text('WAVE ' + Math.max(1, sim.waveIndex) + '/' + sim.waveCount, W / 2, 6, COLORS.white, 8, 'center');
 }
 function drawRunnerMessages() {
   if (mode === 'chapter') drawProgressBar();
-  if (sim.dist < 120) text('SPACE / UP / CLICK TO JUMP', W / 2, 30, '#fff', 8, 'center');
+  if (sim.dist < 120) text('SPACE / UP / CLICK TO JUMP', W / 2, 30, COLORS.white, 8, 'center');
 }
 function drawRoomMessages() {
-  if (sim.cleared) text('ROOM CLEARED - TAKE THE OPEN DOOR', W / 2, 160, '#a7f070', 8, 'center');
-  else if (controlsHint > 0) text('WASD MOVE   MOUSE AIM + HOLD CLICK TO SHOOT', W / 2, 160, '#fff', 8, 'center');
+  if (sim.cleared) text('ROOM CLEARED - TAKE THE OPEN DOOR', W / 2, 160, COLORS.lime, 8, 'center');
+  else if (controlsHint > 0) text('WASD MOVE   MOUSE AIM + HOLD CLICK TO SHOOT', W / 2, 160, COLORS.white, 8, 'center');
 }
 function drawFieldMessages() {
-  if (controlsHint > 0) text(sim.spells.length > 1 ? 'KEYS 1-' + sim.spells.length + ' CHOOSE A SPELL, CLICK TO CAST' : 'AIM WITH THE MOUSE, HOLD CLICK TO CAST THE BOLT', W / 2, 30, '#fff', 8, 'center');
+  if (controlsHint > 0) text(sim.spells.length > 1 ? 'KEYS 1-' + sim.spells.length + ' CHOOSE A SPELL, CLICK TO CAST' : 'AIM WITH THE MOUSE, HOLD CLICK TO CAST THE BOLT', W / 2, 30, COLORS.white, 8, 'center');
   const next = 'WAVE ' + (sim.waveIndex + 1) + (sim.waveCount < Infinity ? '/' + sim.waveCount : '');
-  if (sim.enemies.length === 0 && sim.waveIndex < sim.waveCount && !sim.awaitingUpgrade) text(next, W / 2, 60, '#ffcd75', 16, 'center');
+  if (sim.enemies.length === 0 && sim.waveIndex < sim.waveCount && !sim.awaitingUpgrade) text(next, W / 2, 60, COLORS.yellow, 16, 'center');
 }
 function drawBossBar(b) {
-  text('BOSS', W / 2, 4, '#ef4444', 8, 'center');
-  ctx.fillStyle = '#000'; ctx.fillRect(100, 14, 120, 6);
-  ctx.fillStyle = '#b13e53'; ctx.fillRect(101, 15, Math.round(118 * Math.max(0, b.hp) / b.maxHp), 4);
+  text('BOSS', W / 2, 4, COLORS.red, 8, 'center');
+  ctx.fillStyle = COLORS.black; ctx.fillRect(100, 14, 120, 6);
+  ctx.fillStyle = COLORS.red; ctx.fillRect(101, 15, Math.round(118 * Math.max(0, b.hp) / b.maxHp), 4);
 }
 function drawProgressBar() {
   const p = Math.min(1, (sim.dist + JumpGuy.PLAYER_X) / sim.def.length);
-  ctx.fillStyle = '#000'; ctx.fillRect(90, 18, 140, 4);
-  ctx.fillStyle = '#ffcd75'; ctx.fillRect(91, 19, Math.round(138 * p), 2);
+  ctx.fillStyle = COLORS.black; ctx.fillRect(90, 18, 140, 4);
+  ctx.fillStyle = COLORS.yellow; ctx.fillRect(91, 19, Math.round(138 * p), 2);
 }
 
 function chapterEndText() {
@@ -631,26 +640,26 @@ function chapterEndText() {
 const upgradeButton = i => ({ x: 50, y: 108 + i * 20, w: 220, h: 16 });
 function drawUpgradeChoice() {
   const c = upgradeChoice;
-  panel(c.title, ['CHOOSE AN UPGRADE (1-' + c.offer.length + ')' + (c.note ? ', ' + c.note : '')], '#a7f070');
-  c.labels.forEach((name, i) => button(upgradeButton(i), (i + 1) + '  ' + name, '#3b5dc9'));
+  panel(c.title, ['CHOOSE AN UPGRADE (1-' + c.offer.length + ')' + (c.note ? ', ' + c.note : '')], COLORS.lime);
+  c.labels.forEach((name, i) => button(upgradeButton(i), (i + 1) + '  ' + name, COLORS.blue));
 }
 
 function panel(title, lines, color) {
-  ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = withAlpha(COLORS.black, 0.65); ctx.fillRect(0, 0, W, H);
   text(title, W / 2, 50, color, 20, 'center');
-  lines.forEach((l, i) => text(l, W / 2, 96 + i * 14, '#fff', 8, 'center'));
+  lines.forEach((l, i) => text(l, W / 2, 96 + i * 14, COLORS.white, 8, 'center'));
 }
 
 function button(r, label, color) {
-  ctx.fillStyle = '#1a1c2c'; ctx.fillRect(r.x - 1, r.y - 1, r.w + 2, r.h + 2);
-  ctx.fillStyle = color || '#333c57'; ctx.fillRect(r.x, r.y, r.w, r.h);
-  text(label, r.x + r.w / 2, r.y + (r.h - 8) / 2 + 1, '#fff', 8, 'center');
+  ctx.fillStyle = COLORS.black; ctx.fillRect(r.x - 1, r.y - 1, r.w + 2, r.h + 2);
+  ctx.fillStyle = color || COLORS.slate; ctx.fillRect(r.x, r.y, r.w, r.h);
+  text(label, r.x + r.w / 2, r.y + (r.h - 8) / 2 + 1, COLORS.white, 8, 'center');
 }
 
 function drawMenu() {
   drawBackground(sceneTime * 40); drawGround(sceneTime * 40);
-  text('GtJ', W / 2, 8, '#ffcd75', 26, 'center');
-  text('CHOOSE WHAT TO PLAY', W / 2, 36, '#fff', 8, 'center');
+  text('GtJ', W / 2, 8, COLORS.yellow, 26, 'center');
+  text('CHOOSE WHAT TO PLAY', W / 2, 36, COLORS.white, 8, 'center');
   MENU.forEach((item, i) => {
     const r = CARD(i);
     let title, sub, unlocked;
@@ -668,11 +677,11 @@ function drawMenu() {
       else if (progression.run && progression.run.chapter === c.id) sub = 'CONTINUE - LEVEL ' + progression.run.level + ', ' + progression.run.lives + ' LIVES';
       else sub = 'NEW GAME';
     }
-    ctx.fillStyle = i === menuIndex && unlocked ? '#ffcd75' : '#1a1c2c'; ctx.fillRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
-    ctx.fillStyle = unlocked ? '#3b5dc9' : '#333c57'; ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.fillStyle = i === menuIndex && unlocked ? COLORS.yellow : COLORS.black; ctx.fillRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
+    ctx.fillStyle = unlocked ? COLORS.blue : COLORS.slate; ctx.fillRect(r.x, r.y, r.w, r.h);
     const ix = item.indent || 0;
-    text(title, r.x + 8 + ix, r.y + 1, unlocked ? '#fff' : '#94a3b8', 8);
-    text(sub, r.x + 8 + ix, r.y + 10, unlocked ? '#a7f070' : '#94a3b8', 8);
+    text(title, r.x + 8 + ix, r.y + 1, unlocked ? COLORS.white : COLORS.silver, 8);
+    text(sub, r.x + 8 + ix, r.y + 10, unlocked ? COLORS.lime : COLORS.silver, 8);
   });
   button(BTN.sound, soundLabel());
   button(BTN.reset, 'R  RESET PROGRESS');
@@ -688,31 +697,31 @@ function draw() {
   else PLAY[chapterId].draw();
   ctx.restore();
   if (scene === 'confirm') {
-    ctx.fillStyle = '#0d0e17'; ctx.fillRect(0, 0, W, H);
-    panel('RESET PROGRESS?', ['ALL UNLOCKS, RECORDS AND SAVED LEVELS', 'WILL BE ERASED. SOUND SETTING IS KEPT.'], '#ef4444');
-    button(BTN.yes, 'Y  YES, RESET', '#b13e53'); button(BTN.no, 'N  CANCEL');
+    ctx.fillStyle = COLORS.black; ctx.fillRect(0, 0, W, H);
+    panel('RESET PROGRESS?', ['ALL UNLOCKS, RECORDS AND SAVED LEVELS', 'WILL BE ERASED. SOUND SETTING IS KEPT.'], COLORS.red);
+    button(BTN.yes, 'Y  YES, RESET', COLORS.red); button(BTN.no, 'N  CANCEL');
     return;
   }
   if (scene === 'menu') return;
   drawLives();
   if (scene === 'pause') {
-    panel('PAUSED', [], '#ffcd75');
-    button(BTN.resume, 'P  RESUME', '#3b5dc9'); button(BTN.pauseSound, soundLabel()); button(BTN.quit, 'Q  QUIT TO MENU');
+    panel('PAUSED', [], COLORS.yellow);
+    button(BTN.resume, 'P  RESUME', COLORS.blue); button(BTN.pauseSound, soundLabel()); button(BTN.quit, 'Q  QUIT TO MENU');
     return;
   }
   if (scene === 'play') PLAY[chapterId].messages();
   else if (scene === 'upgrade') drawUpgradeChoice();
   else if (scene === 'cleared' && clearedChapter && chapterId === CHAPTERS[CHAPTERS.length - 1].id) {
-    panel('GtJ COMPLETE!', ['ALL THREE CHAPTERS CLEARED', 'ONE TOWER DEFENSE ENDLESS UNLOCKED', '', 'PRESS ENTER OR CLICK FOR THE MENU'], '#ffcd75');
+    panel('GtJ COMPLETE!', ['ALL THREE CHAPTERS CLEARED', 'ONE TOWER DEFENSE ENDLESS UNLOCKED', '', 'PRESS ENTER OR CLICK FOR THE MENU'], COLORS.yellow);
   } else if (scene === 'cleared') {
-    panel(clearedChapter ? 'CHAPTER CLEARED!' : 'LEVEL CLEARED!', [clearedChapter ? chapterEndText() : 'GET READY FOR THE NEXT LEVEL', '', clearedChapter ? 'PRESS ENTER OR CLICK FOR THE MENU' : 'ENTER / CLICK: NEXT LEVEL   ESC: MENU'], '#a7f070');
+    panel(clearedChapter ? 'CHAPTER CLEARED!' : 'LEVEL CLEARED!', [clearedChapter ? chapterEndText() : 'GET READY FOR THE NEXT LEVEL', '', clearedChapter ? 'PRESS ENTER OR CLICK FOR THE MENU' : 'ENTER / CLICK: NEXT LEVEL   ESC: MENU'], COLORS.lime);
   } else if (scene === 'over') {
     if (mode === 'endless') {
       const r = endlessResult;
       const e = ENDLESS[chapterId];
-      panel(r.newRecord ? 'NEW RECORD!' : 'GAME OVER', [e.result(r.score), r.newRecord ? 'BEST BEATEN' : 'BEST: ' + r.record + e.unit, '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], r.newRecord ? '#ffcd75' : '#ef4444');
+      panel(r.newRecord ? 'NEW RECORD!' : 'GAME OVER', [e.result(r.score), r.newRecord ? 'BEST BEATEN' : 'BEST: ' + r.record + e.unit, '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], r.newRecord ? COLORS.yellow : COLORS.red);
     } else {
-      panel('GAME OVER', ['NO LIVES LEFT', 'YOU RESTART FROM LEVEL 1', '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], '#ef4444');
+      panel('GAME OVER', ['NO LIVES LEFT', 'YOU RESTART FROM LEVEL 1', '', 'ENTER / CLICK: TRY AGAIN   ESC: MENU'], COLORS.red);
     }
   }
 }

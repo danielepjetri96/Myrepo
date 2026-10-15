@@ -13,6 +13,7 @@
 <h1 id="summary">Esecuzione...</h1>
 <pre id="out"></pre>
 <script src="progression.js"></script>
+<script src="pixelfont.js"></script>
 <script src="settings.js"></script>
 <script src="jumpguy-data.js"></script>
 <script src="cleartheroom-data.js"></script>
@@ -1531,6 +1532,34 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     eq([t.maxHp, t.hp], [D.tower.hp + 5, D.tower.hp + 4], 'never above the maximum');
     step(sim, {}, secs(D.waveDelay + 0.5));
     eq(sim.waveIndex, started + D.endless.upgradeEvery + 1, 'play resumes');
+  });
+}
+
+// ---- pixel font ----
+{
+  const F = PixelFont;
+  // every character the game writes on screen: interface texts and upgrade names
+  const USED = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 !#%\'()+,-./:?t' + Object.values(OneTowerData.upgrades).map(u => u.name).join('');
+  const pixelsOf = s => { const pts = []; F.draw(s, (x, y) => pts.push([x, y])); return pts; };
+
+  test('font: has a glyph for every character the game writes, all of the same height', () => {
+    for (const ch of new Set(USED)) eq(ch in F.glyphs, true, JSON.stringify(ch));
+    for (const ch in F.glyphs) eq(F.glyphs[ch].length, F.HEIGHT, JSON.stringify(ch) + ' height');
+  });
+
+  test('font: width is the glyph widths plus 1 px between letters, so text can be centered', () => {
+    eq(F.width(''), 0);
+    eq(F.width('I'), F.glyphs.I[0].length);
+    eq(F.width('AB'), F.glyphs.A[0].length + 1 + F.glyphs.B[0].length);
+    const pts = pixelsOf('HI');
+    eq(Math.max(...pts.map(p => p[0])) + 1, F.width('HI'), 'drawn as wide as measured');
+    eq(Math.max(...pts.map(p => p[1])) + 1 <= F.HEIGHT, true, 'within the height');
+  });
+
+  test('font: draws the lit pixels of a glyph, and an unknown character as a question mark', () => {
+    const lit = F.glyphs.T.join('').split('').filter(c => c !== '.').length;
+    eq(pixelsOf('T').length, lit);
+    eq(pixelsOf('é'), pixelsOf('?'));
   });
 }
 
