@@ -2,7 +2,7 @@
 // No logic here.
 const OneTowerData = {
   tower: {
-    hp: 20,             // Salute, full at the start of every level
+    hp: 25,             // Salute, full at the start of every level
     size: 24,           // side of the square the enemies stop against
   },
 
@@ -32,11 +32,11 @@ const OneTowerData = {
   enemies: {
     goblin:  { hp: 4,  speed: 15, damage: 1, attackEvery: 1, size: 10 },
     wolf:    { hp: 2,  speed: 30, damage: 1, attackEvery: 1, size: 10 },   // fast and fragile
-    orc:     { hp: 15, speed: 9,  damage: 3, attackEvery: 1, size: 14 },   // slow and tough
+    orc:     { hp: 15, speed: 9,  damage: 2, attackEvery: 1, size: 14 },   // slow and tough
     shaman:  { hp: 5,  speed: 12, damage: 1, attackEvery: 2, size: 10, range: 60 },   // stops at a distance and strikes from there
     // The Boss: the last wave of the last level, alone. Every `summon.every` s it calls `count` enemies around itself;
     // Frost slows it only by `frostFactor` of the usual amount.
-    boss:    { hp: 120, speed: 6, damage: 5, attackEvery: 1, size: 22, frostFactor: 0.5, summon: { every: 10, type: 'goblin', count: 3 } },
+    boss:    { hp: 100, speed: 6, damage: 3, attackEvery: 1, size: 22, frostFactor: 0.5, summon: { every: 10, type: 'goblin', count: 3 } },
   },
 
   // Potenziamenti, offered 3 at a time. target: a spell or 'tower'; add / mul / set: the values they change
@@ -66,7 +66,7 @@ const OneTowerData = {
     { waves: 4, perWave: [5, 7],  types: { goblin: 3, wolf: 2 },                       spell: 'fireball' },
     { waves: 5, perWave: [6, 8],  types: { goblin: 3, wolf: 2, orc: 1 },               spell: 'frost' },
     { waves: 6, perWave: [7, 10], types: { goblin: 3, wolf: 2, orc: 1, shaman: 2 },    spell: 'lightning' },
-    { waves: 6, perWave: [8, 12], types: { goblin: 3, wolf: 3, orc: 2, shaman: 2 },    spell: 'meteor', boss: true },
+    { waves: 6, perWave: [7, 10], types: { goblin: 3, wolf: 3, orc: 2, shaman: 2 },    spell: 'meteor', boss: true },
   ],
 
   // Endless: every spell from the start, no upgrades, one life. Wave n eases from the `first` size to the `last` one,

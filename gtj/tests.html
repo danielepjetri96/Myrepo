@@ -1341,10 +1341,10 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
     eq(st(['lightningDamage']).spells.lightning.damage.slice(0, 3), [6, 5, 4]);
     eq(st(['meteorRecharge']).spells.meteor.recharge, 14);
     eq(st(['meteorDamage']).spells.meteor.damage, 18);
-    eq(st(['towerHealth']).tower.hp, 25);
-    eq(st(['towerHealth', 'towerHealth']).tower.hp, 30);
+    eq(st(['towerHealth']).tower.hp, D.tower.hp + 5);
+    eq(st(['towerHealth', 'towerHealth']).tower.hp, D.tower.hp + 10);
     eq(base.fireball.radius, 20, 'the data is left untouched');
-    eq(OneTower.create({ waves: [[]], upgrades: ['towerHealth'] }).tower.hp, 25, 'a level starts with the upgraded Torretta');
+    eq(OneTower.create({ waves: [[]], upgrades: ['towerHealth'] }).tower.hp, D.tower.hp + 5, 'a level starts with the upgraded Torretta');
   });
 
   test('otd upgrades: 3 different offers, only for unlocked spells, never one already taken (but Torretta health)', () => {
@@ -1406,7 +1406,7 @@ test('replaying a completed chapter restarts at level 1 and keeps the unlocks an
       [4, [5, 7], ['goblin', 'wolf'], 'fireball', false],
       [5, [6, 8], ['goblin', 'orc', 'wolf'], 'frost', false],
       [6, [7, 10], ['goblin', 'orc', 'shaman', 'wolf'], 'lightning', false],
-      [6, [8, 12], ['goblin', 'orc', 'shaman', 'wolf'], 'meteor', true],
+      [6, [7, 10], ['goblin', 'orc', 'shaman', 'wolf'], 'meteor', true],
     ]);
     eq(OneTower.levelSpells(1), ['bolt']);
     eq(OneTower.levelSpells(3), ['bolt', 'fireball', 'frost']);
