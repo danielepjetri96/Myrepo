@@ -419,18 +419,18 @@ test('lower levels only use patterns up to their tier', () => {
   for (let s = 1; s <= 5; s++) eq(JumpGuy.buildLevel(1, seeded(s)).obstacles.every(o => o.h <= maxH), true);
 });
 
-test('every pattern can be cleared with one jump at every level speed it appears in', () => {
+test('every pattern can be cleared with one jump, with at least 150 ms of leeway, at every level speed it appears in', () => {
   JumpGuyData.levels.forEach((cfg, li) => {
     for (const p of JumpGuyData.patterns.filter(p => p.tier <= cfg.maxTier)) {
       const obstacles = p.o.map(([dx, w, h]) => ({ x: 200 + dx, w, h }));
-      let cleared = false;
-      for (let start = 0; start < 200 && !cleared; start++) { // try every jump moment
+      let run = 0, best = 0;
+      for (let start = 0; start < 200; start++) { // try every jump moment: the longest run of good ones is the timing window
         const sim = JumpGuy.create({ length: 420, speed: cfg.speed, obstacles });
         let ev = null;
         for (let i = 0; i < 400 && !ev; i++) ev = sim.update(STEP, { pressed: i === start });
-        cleared = ev === 'passed';
+        run = ev === 'passed' ? run + 1 : 0; best = Math.max(best, run);
       }
-      eq(cleared, true, 'level ' + (li + 1) + ' pattern ' + JSON.stringify(p.o));
+      eq(best >= 9, true, 'level ' + (li + 1) + ' pattern ' + JSON.stringify(p.o) + ' window ' + best + ' frames');
     }
   });
 });

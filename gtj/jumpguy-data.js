@@ -14,13 +14,13 @@ const JumpGuyData = {
   // distances in tierAt (tier 2, then tier 3). The gap between patterns goes from gapExtraStart to gapExtraEnd.
   endless: {
     startSpeed: 90, maxSpeed: 150, rampDistance: 5000,
-    tierAt: [1000, 2500],
+    tierAt: [1000, 3500],
     gapExtraStart: [70, 150], gapExtraEnd: [0, 50],
     metersPerPx: 0.1,          // score unit: 1 metre = 10 px
   },
 
   // Obstacle patterns, picked in random order. Each obstacle is [dx, w, h] relative to the pattern start.
-  // tier: 1 easy, 2 medium, 3 hard. Every pattern must stay clearable with a single jump (checked by tests.html).
+  // tier: 1 easy, 2 medium, 3 hard. Every pattern must stay clearable with a single jump, with at least 150 ms of leeway at the speed of the levels it appears in (checked by tests.html).
   patterns: [
     { tier: 1, o: [[0, 14, 14]] },                                  // single spike
     { tier: 1, o: [[0, 14, 14], [14, 14, 14]] },                    // double spike
@@ -37,9 +37,9 @@ const JumpGuyData = {
     { tier: 2, o: [[0, 14, 24], [24, 14, 14]] },                    // tall then spike
     { tier: 2, o: [[0, 14, 10], [14, 14, 16], [28, 14, 22]] },      // stairs up
     { tier: 2, o: [[0, 14, 22], [14, 14, 16], [28, 14, 10]] },      // stairs down
-    { tier: 2, o: [[0, 14, 14], [22, 14, 14], [44, 14, 14]] },      // three spikes spaced
     { tier: 2, o: [[0, 14, 20], [30, 14, 20]] },                    // two pillars
     { tier: 3, o: [[0, 14, 28]] },                                  // very tall pillar
+    { tier: 3, o: [[0, 14, 14], [22, 14, 14], [44, 14, 14]] },      // three spikes spaced
     { tier: 3, o: [[0, 14, 14], [18, 14, 26], [36, 14, 14]] },      // spike, tower, spike
     { tier: 3, o: [[0, 14, 26], [14, 14, 26], [28, 14, 14]] },      // wall then spike
     { tier: 3, o: [[0, 14, 14], [14, 14, 26], [28, 14, 26]] },      // spike then wall
